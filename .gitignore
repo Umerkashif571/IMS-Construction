@@ -1,0 +1,29 @@
+# Environment files
+.env
+server/.env
+client/.env
+
+# Dependencies
+node_modules/
+
+# Build output
+client/dist/
+
+# Backups
+server/backups/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Misc
+.pi/
