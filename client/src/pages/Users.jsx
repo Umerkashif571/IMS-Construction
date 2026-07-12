@@ -38,7 +38,7 @@ export default function Users() {
         toast.success('User created')
       }
       setModal({ open: false, item: null }); load()
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const toggleActive = async (u) => {
@@ -46,7 +46,7 @@ export default function Users() {
       await api.put(`/users/${u.id}`, { is_active: !u.is_active })
       toast.success(`User ${u.is_active ? 'deactivated' : 'activated'}`)
       load()
-    } catch (err) { toast.error('Failed to update user') }
+    } catch (err) { console.error(err); toast.error('Failed to update user') }
   }
 
   if (!isAdmin) {

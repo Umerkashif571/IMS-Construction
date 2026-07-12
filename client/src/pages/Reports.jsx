@@ -60,7 +60,7 @@ export default function Reports() {
       const { data: result } = await api.get(`/reports/${key}`)
       setData(result || [])
     } catch (err) {
-      toast.error('Failed to load report')
+      console.error(err); toast.error('Failed to load report')
       setData([])
     } finally {
       setLoadingReport(false)

@@ -37,7 +37,7 @@ router.get('/list', authenticate, authorize('owner', 'admin'), async (req, res) 
       })
       .sort((a, b) => new Date(b.created) - new Date(a.created));
     res.json(files);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/restore', authenticate, authorize('owner', 'admin'), async (req, res) => {

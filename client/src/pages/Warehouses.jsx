@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
-import { Plus, Search, Edit3, Trash2, ArrowRightLeft, Building2, X, Warehouse as WarehouseIcon } from 'lucide-react'
+import { Plus, Search, Edit3, Trash2, ArrowRightLeft, Building2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const statusBadge = (s) => {
@@ -40,7 +40,7 @@ export default function Warehouses() {
       setWarehouses(wRes.data)
       setProjects(pRes.data || [])
       setUsers(uRes.data || [])
-    }).catch(() => toast.error('Failed to load warehouses')).finally(() => setLoading(false))
+    }).catch(err => { console.error(err); toast.error('Failed to load warehouses') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -50,11 +50,11 @@ export default function Warehouses() {
       if (form.id) { await api.put(`/warehouses/${form.id}`, form); toast.success('Warehouse updated') }
       else { await api.post('/warehouses', form); toast.success('Warehouse created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/warehouses/${deleteConfirm.id}`); toast.success('Warehouse deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { toast.error('Failed to delete') }
+    try { await api.delete(`/warehouses/${deleteConfirm.id}`); toast.success('Warehouse deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const openDetail = async (warehouse) => {
@@ -62,7 +62,7 @@ export default function Warehouses() {
       const { data } = await api.get(`/warehouses/${warehouse.id}/transactions`)
       setDetailModal({ open: true, warehouse, transactions: data || [] })
     } catch (err) {
-      toast.error('Failed to load transactions')
+      console.error(err); toast.error('Failed to load transactions')
     }
   }
 
@@ -104,7 +104,7 @@ export default function Warehouses() {
       })
       toast.success('Transfer request created')
       setTransferModal({ open: false }); loadTransfers()
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to create transfer') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create transfer') }
   }
 
   const handleTransferAction = async (id, action) => {
@@ -112,7 +112,7 @@ export default function Warehouses() {
       await api.put(`/warehouses/transfers/${id}`, { status: action })
       toast.success(`Transfer ${action}d`)
       loadTransfers()
-    } catch (err) { toast.error(`Failed to ${action} transfer`) }
+    } catch (err) { console.error(err); toast.error(`Failed to ${action} transfer`) }
   }
 
   const getEntityOptions = () => {

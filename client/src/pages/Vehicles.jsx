@@ -33,7 +33,7 @@ export default function Vehicles() {
     const params = q ? `?search=${q}` : ''
     Promise.all([api.get(`/vehicles${params}`), api.get('/projects')])
       .then(([vRes, pRes]) => { setVehicles(vRes.data); setProjects(pRes.data || []) })
-      .catch(() => toast.error('Failed to load vehicles'))
+      .catch(err => { console.error(err); toast.error('Failed to load vehicles') })
       .finally(() => setLoading(false))
   }
 
@@ -44,12 +44,12 @@ export default function Vehicles() {
       if (form.id) { await api.put(`/vehicles/${form.id}`, form); toast.success('Vehicle updated') }
       else { await api.post('/vehicles', form); toast.success('Vehicle created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
     try { await api.delete(`/vehicles/${deleteConfirm.id}`); toast.success('Vehicle deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { toast.error('Failed to delete') }
+    catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const handleFuelSubmit = async () => {
@@ -58,7 +58,7 @@ export default function Vehicles() {
       await api.post(`/vehicles/${fuelModal.vehicle.id}/fuel`, { liters: parseFloat(fuelForm.liters) || 0, cost: parseFloat(fuelForm.cost) || 0, notes: fuelForm.notes })
       toast.success('Fuel log added'); setFuelModal({ open: false, vehicle: null }); setFuelForm({ liters: '', cost: '', notes: '' })
       if (expanded === fuelModal.vehicle.id) loadFuelLogs(fuelModal.vehicle.id)
-    } catch (err) { toast.error('Failed to add fuel log') }
+    } catch (err) { console.error(err); toast.error('Failed to add fuel log') }
   }
 
   const handleMaintSubmit = async () => {
@@ -67,7 +67,7 @@ export default function Vehicles() {
       await api.post(`/vehicles/${maintenanceModal.vehicle.id}/maintenance`, { maintenance_type: maintForm.type, description: maintForm.description, cost: parseFloat(maintForm.cost) || 0, scheduled_date: maintForm.date || null })
       toast.success('Maintenance log added'); setMaintenanceModal({ open: false, vehicle: null }); setMaintForm({ type: '', description: '', cost: '', date: '' })
       if (expanded === maintenanceModal.vehicle.id) loadMaintLogs(maintenanceModal.vehicle.id)
-    } catch (err) { toast.error('Failed to add maintenance log') }
+    } catch (err) { console.error(err); toast.error('Failed to add maintenance log') }
   }
 
   const loadFuelLogs = async (id) => { try { const { data } = await api.get(`/vehicles/${id}/fuel`); setFuelLogs(data) } catch (e) { setFuelLogs([]) } }

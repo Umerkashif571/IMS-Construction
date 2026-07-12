@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { ConfirmDialog, Button, LoadingSkeleton, EmptyState } from '../components/ui'
-import { Download, Upload, Database, Shield, ShieldOff, HardDrive, RotateCcw } from 'lucide-react'
+import { Download, Upload, ShieldOff, HardDrive, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function Backup() {
@@ -16,7 +16,7 @@ export default function Backup() {
 
   const load = () => {
     setLoading(true)
-    api.get('/backup/list').then(({ data }) => setBackups(data || [])).catch(() => toast.error('Failed to load backups')).finally(() => setLoading(false))
+    api.get('/backup/list').then(({ data }) => setBackups(data || [])).catch(err => { console.error(err); toast.error('Failed to load backups') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -34,7 +34,7 @@ export default function Backup() {
       toast.success('Backup exported')
       load()
     } catch (err) {
-      toast.error('Backup failed: ' + (err.response?.data?.error || err.message))
+      console.error(err); toast.error('Backup failed: ' + (err.response?.data?.error || err.message))
     } finally {
       setBackingUp(false)
     }
@@ -46,7 +46,7 @@ export default function Backup() {
       toast.success('Database restored from backup')
       setRestoreConfirm({ open: false, name: '' })
     } catch (err) {
-      toast.error('Restore failed: ' + (err.response?.data?.error || err.message))
+      console.error(err); toast.error('Restore failed: ' + (err.response?.data?.error || err.message))
     }
   }
 

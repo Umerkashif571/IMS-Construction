@@ -26,7 +26,7 @@ export default function Projects() {
   const load = (q = '') => {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
-    api.get(`/projects${params}`).then(({ data }) => setProjects(data)).catch(() => toast.error('Failed to load projects')).finally(() => setLoading(false))
+    api.get(`/projects${params}`).then(({ data }) => setProjects(data)).catch(err => { console.error(err); toast.error('Failed to load projects') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -36,18 +36,18 @@ export default function Projects() {
       if (form.id) { await api.put(`/projects/${form.id}`, form); toast.success('Project updated') }
       else { await api.post('/projects', form); toast.success('Project created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/projects/${deleteConfirm.id}`); toast.success('Project deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { toast.error('Failed to delete') }
+    try { await api.delete(`/projects/${deleteConfirm.id}`); toast.success('Project deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const openDetail = async (project) => {
     try {
       const [projRes, matCostRes] = await Promise.all([api.get(`/projects/${project.id}`), api.get(`/projects/${project.id}/material-cost`)])
       setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data })
-    } catch (err) { toast.error('Failed to load project details') }
+    } catch (err) { console.error(err); toast.error('Failed to load project details') }
   }
 
   const viewAllocations = async (project) => {
@@ -55,7 +55,7 @@ export default function Projects() {
     try {
       const [mat, veh, tol] = await Promise.all([api.get(`/projects/${project.id}/materials`), api.get(`/projects/${project.id}/vehicles`), api.get(`/projects/${project.id}/tools`)])
       setAllocData({ materials: mat.data || [], vehicles: veh.data || [], tools: tol.data || [] })
-    } catch (err) { toast.error('Failed to load allocations'); setAllocData({ materials: [], vehicles: [], tools: [] }) }
+    } catch (err) { console.error(err); toast.error('Failed to load allocations'); setAllocData({ materials: [], vehicles: [], tools: [] }) }
   }
 
   return (

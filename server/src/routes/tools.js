@@ -36,8 +36,9 @@ router.get('/:id', authenticate, async (req, res) => {
 
 router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
   try {
-    const { name, serial_number, type, category, description, purchase_date, purchase_cost, current_condition, current_status, next_maintenance_date, warehouse_id, storage_location, notes } = req.body;
+    let { name, serial_number, type, category, description, purchase_date, purchase_cost, current_condition, current_status, next_maintenance_date, warehouse_id, storage_location, notes } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
+    if (!warehouse_id) warehouse_id = null;
     const { rows } = await pool.query(
       `INSERT INTO tools (name, serial_number, type, category, description, purchase_date, purchase_cost, current_condition, current_status, next_maintenance_date, warehouse_id, storage_location, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
@@ -51,7 +52,9 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), asy
 
 router.put('/:id', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
   try {
-    const { name, serial_number, type, category, description, current_condition, current_status, purchase_date, purchase_cost, next_maintenance_date, maintenance_interval_days, checked_out_to, checked_out_employee, assigned_project_id, return_due_date, warehouse_id, storage_location, notes } = req.body;
+    let { name, serial_number, type, category, description, current_condition, current_status, purchase_date, purchase_cost, next_maintenance_date, maintenance_interval_days, checked_out_to, checked_out_employee, assigned_project_id, return_due_date, warehouse_id, storage_location, notes } = req.body;
+    if (!assigned_project_id) assigned_project_id = null;
+    if (!warehouse_id) warehouse_id = null;
     const { rows } = await pool.query(
       `UPDATE tools SET name=$1, serial_number=$2, type=$3, category=$4, description=$5, current_condition=$6, current_status=$7, purchase_date=$8, purchase_cost=$9, next_maintenance_date=$10, maintenance_interval_days=$11, checked_out_to=$12, checked_out_employee=$13, assigned_project_id=$14, return_due_date=$15, warehouse_id=$16, storage_location=$17, notes=$18, updated_at=NOW() WHERE id=$19 RETURNING *`,
       [name, serial_number, type, category, description, current_condition, current_status, purchase_date, purchase_cost, next_maintenance_date, maintenance_interval_days, checked_out_to, checked_out_employee, assigned_project_id, return_due_date, warehouse_id, storage_location, notes, req.params.id]

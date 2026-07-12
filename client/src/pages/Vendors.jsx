@@ -27,7 +27,7 @@ export default function Vendors() {
   const load = (q = '') => {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
-    api.get(`/vendors${params}`).then(({ data }) => setVendors(data)).catch(() => toast.error('Failed to load vendors')).finally(() => setLoading(false))
+    api.get(`/vendors${params}`).then(({ data }) => setVendors(data)).catch(err => { console.error(err); toast.error('Failed to load vendors') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -37,11 +37,11 @@ export default function Vendors() {
       if (form.id) { await api.put(`/vendors/${form.id}`, form); toast.success('Vendor updated') }
       else { await api.post('/vendors', form); toast.success('Vendor created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/vendors/${deleteConfirm.id}`); toast.success('Vendor deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { toast.error('Failed to delete') }
+    try { await api.delete(`/vendors/${deleteConfirm.id}`); toast.success('Vendor deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const viewPOs = async (vendor) => {
@@ -49,15 +49,15 @@ export default function Vendors() {
     try {
       const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendor.id } })
       setPos(data || [])
-    } catch (err) { toast.error('Failed to load purchase orders'); setPos([]) }
+    } catch (err) { console.error(err); toast.error('Failed to load purchase orders'); setPos([]) }
   }
 
   const handleApprovePO = async (poId) => {
-    try { await api.put(`/purchase-orders/${poId}/approve`); toast.success('PO approved'); viewPOs(poModal.vendor) } catch (err) { toast.error('Approval failed') }
+    try { await api.put(`/purchase-orders/${poId}/approve`); toast.success('PO approved'); viewPOs(poModal.vendor) } catch (err) { console.error(err); toast.error('Approval failed') }
   }
 
   const handleReceivePO = async (poId) => {
-    try { await api.put(`/purchase-orders/${poId}/receive`); toast.success('PO marked as received'); viewPOs(poModal.vendor) } catch (err) { toast.error('Failed to update PO') }
+    try { await api.put(`/purchase-orders/${poId}/receive`); toast.success('PO marked as received'); viewPOs(poModal.vendor) } catch (err) { console.error(err); toast.error('Failed to update PO') }
   }
 
   const addPoItem = () => setPoForm({ ...poForm, items: [...poForm.items, { material_name: '', quantity: '', unit: '', unit_price: '' }] })
@@ -73,7 +73,7 @@ export default function Vendors() {
     try {
       await api.post(`/vendors/${createPoModal.vendor.id}/purchase-orders`, { items: poForm.items.map(it => ({ ...it, quantity: parseFloat(it.quantity) || 0, unit_price: parseFloat(it.unit_price) || 0 })) })
       toast.success('Purchase order created'); setCreatePoModal({ open: false, vendor: null }); setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }] })
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to create PO') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create PO') }
   }
 
   return (

@@ -49,7 +49,7 @@ router.get('/:id', authenticate, async (req, res) => {
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Material not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
@@ -60,6 +60,9 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), asy
     description = sanitize(description);
     if (!sku || !name || !unit) return res.status(400).json({ error: 'SKU, name, and unit required' });
     if (!isValidPositiveNumber(quantity)) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
+    if (!category_id) category_id = null;
+    if (!supplier_id) supplier_id = null;
+    if (!warehouse_id) warehouse_id = null;
     const { rows } = await pool.query(
       `INSERT INTO materials (sku, name, description, category_id, unit, quantity, reorder_level, unit_cost, supplier_id, storage_location, warehouse_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
@@ -82,6 +85,9 @@ router.put('/:id', authenticate, authorize('owner', 'admin', 'store_manager'), a
     description = sanitize(description);
     if (!name) return res.status(400).json({ error: 'Name is required' });
     if (quantity !== undefined && !isValidPositiveNumber(quantity)) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
+    if (!category_id) category_id = null;
+    if (!supplier_id) supplier_id = null;
+    if (!warehouse_id) warehouse_id = null;
     const { rows } = await pool.query(
       `UPDATE materials SET name=$1, description=$2, category_id=$3, unit=$4, quantity=$5, reorder_level=$6, unit_cost=$7, supplier_id=$8, storage_location=$9, warehouse_id=$10, updated_at=NOW()
        WHERE id=$11 RETURNING *`,
@@ -101,7 +107,7 @@ router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'material', req.params.id, `Deleted material: ${rows[0].name}`);
     await addActivity(req.user.full_name, 'deleted', `Removed material: ${rows[0].name}`, 'material', req.params.id);
     res.json({ message: 'Material deleted' });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Stock IN (atomic, TOCTOU-safe)
@@ -354,7 +360,7 @@ router.get('/:id/movements', authenticate, async (req, res) => {
       [req.params.id]
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Categories
@@ -362,7 +368,7 @@ router.get('/categories/list', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM categories ORDER BY name');
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;

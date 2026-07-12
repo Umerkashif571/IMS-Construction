@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Table, Td, Card, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
-import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Printer, Share2, X, Ticket } from 'lucide-react'
+import { Modal, ConfirmDialog, Table, Td, Card, Button, Input, Select, LoadingSkeleton, EmptyState } from '../components/ui'
+import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket } from 'lucide-react'
 import { GatePassDetail } from './GatePass'
 import toast from 'react-hot-toast'
 
@@ -62,7 +62,7 @@ export default function Materials() {
     const params = q ? `?search=${q}` : ''
     Promise.all([api.get(`/materials${params}`), api.get('/materials/categories/list'), api.get('/projects'), api.get('/warehouses')])
       .then(([matRes, catRes, projRes, whRes]) => { setMaterials(matRes.data); setCategories(catRes.data); setProjects(projRes.data); setWarehouses(whRes.data) })
-      .catch(() => toast.error('Failed to load materials'))
+      .catch(err => { console.error(err); toast.error('Failed to load materials') })
       .finally(() => setLoading(false))
   }
 
@@ -73,17 +73,17 @@ export default function Materials() {
       if (form.id) { await api.put(`/materials/${form.id}`, form); toast.success('Material updated') }
       else { await api.post('/materials', form); toast.success('Material created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
     try { await api.delete(`/materials/${deleteConfirm.id}`); toast.success('Material deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { toast.error('Failed to delete') }
+    catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const openDetail = async (material) => {
     try { const { data } = await api.get(`/materials/${material.id}/transactions`); setDetailModal({ open: true, material, transactions: data }) }
-    catch (err) { toast.error('Failed to load transactions') }
+    catch (err) { console.error(err); toast.error('Failed to load transactions') }
   }
 
   const handleStockIn = async () => {
@@ -95,7 +95,7 @@ export default function Materials() {
       setStockInModal({ open: false, material: null })
       setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '' })
       load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to record stock in') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock in') }
   }
 
   const handleStockOut = async () => {
@@ -117,7 +117,7 @@ export default function Materials() {
       } else {
         load(search)
       }
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to record stock out') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock out') }
   }
 
   const stockInTx = detailModal.transactions.filter(t => t.type === 'in' && filterByDate(t))
@@ -366,7 +366,7 @@ export default function Materials() {
                 const a = document.createElement('a'); a.href = url; a.download = `GatePass_${gpPopup.gp.gate_pass_no}.pdf`; a.click()
                 window.URL.revokeObjectURL(url)
                 toast.success('PDF exported')
-              } catch { toast.error('PDF export not available') }
+              } catch (err) { console.error(err); toast.error('PDF export not available') }
             }}
           />
         </div>

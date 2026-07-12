@@ -18,7 +18,7 @@ export default function GatePass() {
       api.get(`/gatepass/${id}`).then(({ data }) => {
         setDetailModal({ open: true, gp: data })
         setLoading(false)
-      }).catch(() => { setLoading(false); toast.error('Gate pass not found') })
+      }).catch(err => { console.error(err); setLoading(false); toast.error('Gate pass not found') })
     } else {
       load()
     }
@@ -29,7 +29,7 @@ export default function GatePass() {
     api.get('/gatepass').then(({ data }) => {
       setGatePasses(data || [])
       setLoading(false)
-    }).catch(() => { setLoading(false); toast.error('Failed to load gate passes') })
+    }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load gate passes') })
   }
 
   const openDetail = (gp) => {
@@ -103,8 +103,8 @@ export default function GatePass() {
       a.click()
       window.URL.revokeObjectURL(url)
       toast.success('PDF exported')
-    } catch {
-      toast.error('PDF export not available, use Print instead')
+    } catch (err) {
+      console.error(err); toast.error('PDF export not available, use Print instead')
       handlePrint(gp)
     }
   }

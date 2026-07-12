@@ -19,6 +19,8 @@ router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => 
   try {
     const { email, password, full_name, role, phone } = req.body;
     if (!email || !password || !full_name || !role) return res.status(400).json({ error: 'All fields required' });
+    if (role === 'owner' && req.user.role !== 'owner')
+      return res.status(403).json({ error: 'Only owners can create owner accounts' });
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
       `INSERT INTO users (email, password_hash, full_name, role, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id, email, full_name, role, phone`,
@@ -26,7 +28,7 @@ router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => 
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'user', rows[0].id, `Created user: ${full_name}`);
     res.status(201).json(rows[0]);
-  } catch (err) { if (err.code === '23505') return res.status(400).json({ error: 'Email already exists' }); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { if (err.code === '23505') return res.status(400).json({ error: 'Email already exists' }); console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.put('/:id', authenticate, authorize('owner', 'admin'), async (req, res) => {
@@ -37,6 +39,8 @@ router.put('/:id', authenticate, authorize('owner', 'admin'), async (req, res) =
       return res.status(403).json({ error: 'Owner accounts cannot be modified' });
 
     const { full_name, role, phone, is_active } = req.body;
+    if (role === 'owner' && req.user.role !== 'owner')
+      return res.status(403).json({ error: 'Only owners can assign the owner role' });
     const { rows } = await pool.query(
       `UPDATE users SET full_name=COALESCE($1, full_name), role=COALESCE($2, role), phone=COALESCE($3, phone), is_active=COALESCE($4, is_active) WHERE id=$5 RETURNING id, email, full_name, role, phone, is_active`,
       [full_name ?? null, role ?? null, phone ?? null, is_active ?? null, req.params.id]
@@ -50,7 +54,7 @@ router.get('/audit-logs', authenticate, authorize('owner', 'admin'), async (req,
   try {
     const { rows } = await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200');
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 module.exports = router;

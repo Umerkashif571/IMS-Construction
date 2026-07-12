@@ -14,7 +14,7 @@ export default function Dashboard() {
     api.get('/dashboard').then(({ data }) => {
       setData(data)
       setLoading(false)
-    }).catch(() => { setLoading(false); toast.error('Failed to load dashboard') })
+    }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load dashboard') })
   }, [])
 
   if (loading) return (

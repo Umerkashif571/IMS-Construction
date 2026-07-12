@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
-import { Plus, Search, Wrench, Edit3, Trash2, ArrowUpFromLine, ArrowDownToLine, History, ExternalLink, CircleAlert } from 'lucide-react'
+import { Plus, Search, Wrench, Edit3, Trash2, ArrowUpFromLine, ArrowDownToLine, History, CircleAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const conditionBadge = (c) => {
@@ -36,7 +36,7 @@ export default function Tools() {
     const params = q ? `?search=${q}` : ''
     Promise.all([api.get(`/tools${params}`), api.get('/warehouses')])
       .then(([tRes, wRes]) => { setTools(tRes.data); setWarehouses(wRes.data) })
-      .catch(() => toast.error('Failed to load tools'))
+      .catch(err => { console.error(err); toast.error('Failed to load tools') })
       .finally(() => setLoading(false))
   }
 
@@ -47,12 +47,12 @@ export default function Tools() {
       if (form.id) { await api.put(`/tools/${form.id}`, form); toast.success('Tool updated') }
       else { await api.post('/tools', form); toast.success('Tool created') }
       setModal({ open: false, item: null }); load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed to save') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
     try { await api.delete(`/tools/${deleteConfirm.id}`); toast.success('Tool deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { toast.error('Failed to delete') }
+    catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
   const handleCheckout = async () => {
@@ -63,7 +63,7 @@ export default function Tools() {
       setCheckoutModal({ open: false, tool: null })
       setCheckoutForm({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
       load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Checkout failed') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Checkout failed') }
   }
 
   const openCheckin = async (tool) => {
@@ -73,7 +73,7 @@ export default function Tools() {
       setCheckinModal({ open: true, tool, checkoutRecord: record })
       setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' })
     } catch (err) {
-      toast.error('Failed to load checkout info')
+      console.error(err); toast.error('Failed to load checkout info')
     }
   }
 
@@ -85,12 +85,12 @@ export default function Tools() {
       setCheckinModal({ open: false, tool: null, checkoutRecord: null })
       setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' })
       load(search)
-    } catch (err) { toast.error(err.response?.data?.error || 'Checkin failed') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Checkin failed') }
   }
 
   const openHistory = async (tool) => {
     try { const { data } = await api.get(`/tools/${tool.id}/checkout-history`); setHistoryModal({ open: true, tool, history: data }) }
-    catch (err) { toast.error('Failed to load history') }
+    catch (err) { console.error(err); toast.error('Failed to load history') }
   }
 
   const isMaintDue = (t) => t.next_maintenance_date && new Date(t.next_maintenance_date) <= new Date()

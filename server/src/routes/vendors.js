@@ -24,7 +24,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM vendors WHERE id=$1', [req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/', authenticate, authorize('owner', 'admin', 'procurement_officer'), async (req, res) => {
@@ -58,7 +58,7 @@ router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res
     const { rows } = await pool.query('UPDATE vendors SET status=$1 WHERE id=$2 RETURNING name', ['inactive', req.params.id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
     res.json({ message: 'Vendor deactivated' });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Purchase Orders
@@ -81,13 +81,14 @@ router.get('/pos/:id', authenticate, async (req, res) => {
     if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     res.json({ ...po[0], items });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/pos', authenticate, authorize('owner', 'admin', 'procurement_officer', 'store_manager'), async (req, res) => {
   try {
-    const { vendor_id, vendor_name, project_id, expected_delivery, notes, items } = req.body;
+    let { vendor_id, vendor_name, project_id, expected_delivery, notes, items } = req.body;
     if (!vendor_id || !items || items.length === 0) return res.status(400).json({ error: 'Vendor and items required' });
+    if (!project_id) project_id = null;
     // Generate PO number
     const { rows: count } = await pool.query("SELECT COUNT(*) as c FROM purchase_orders");
     const poNum = `PO-${new Date().getFullYear()}-${String(parseInt(count[0].c) + 1).padStart(4, '0')}`;
@@ -121,7 +122,7 @@ router.put('/pos/:id/approve', authenticate, authorize('owner', 'admin', 'procur
     );
     if (rows.length === 0) return res.status(404).json({ error: 'PO not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.put('/pos/:id/delivery', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {

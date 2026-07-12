@@ -38,7 +38,7 @@ router.get('/:id', authenticate, async (req, res) => {
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Material cost breakdown for a project
@@ -99,7 +99,7 @@ router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res
     if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'project', req.params.id, `Deleted project: ${rows[0].name}`);
     res.json({ message: 'Project deleted' });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Allocations
