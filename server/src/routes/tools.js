@@ -94,17 +94,34 @@ router.post('/:id/checkout', authenticate, authorize('owner', 'admin', 'store_ma
 
 router.post('/:id/checkin', authenticate, authorize('owner', 'admin', 'store_manager', 'site_engineer'), async (req, res) => {
   try {
-    const { condition_on_return, notes } = req.body;
+    const { condition_on_return, notes, returned_by } = req.body;
+    if (!returned_by) return res.status(400).json({ error: 'Returned by is required' });
+
+    // Get current tool data before update
+    const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1', [req.params.id]);
+    if (tool.length === 0) return res.status(404).json({ error: 'Tool not found' });
+
+    const checkedOutTo = tool[0].checked_out_to;
+
+    // If condition is damaged or poor, flag for maintenance
+    const needsMaintenance = ['damaged', 'poor'].includes(condition_on_return);
+    const newStatus = needsMaintenance ? 'under_maintenance' : 'available';
+
     await pool.query(
-      `UPDATE tools SET current_status='available', checked_out_to=NULL, checked_out_employee=NULL, assigned_project_id=NULL, return_due_date=NULL, current_condition=$1 WHERE id=$2`,
-      [condition_on_return || 'good', req.params.id]
+      `UPDATE tools SET current_status=$1, checked_out_to=NULL, checked_out_employee=NULL, assigned_project_id=NULL, return_due_date=NULL, current_condition=$2 WHERE id=$3`,
+      [newStatus, condition_on_return || 'good', req.params.id]
     );
-    const { rows: tool } = await pool.query('SELECT name FROM tools WHERE id=$1', [req.params.id]);
+
     await pool.query(
-      `UPDATE tool_checkout_log SET actual_return_date=NOW(), condition_on_return=$1, notes=CASE WHEN notes IS NULL THEN $2 ELSE notes || ' | Return: ' || $2 END WHERE tool_id=$3 AND actual_return_date IS NULL`,
-      [condition_on_return, notes, req.params.id]
+      `UPDATE tool_checkout_log SET actual_return_date=NOW(), condition_on_return=$1, returned_by=$2, notes=CASE WHEN notes IS NULL THEN $3 ELSE notes || ' | Return: ' || $3 END WHERE tool_id=$4 AND actual_return_date IS NULL`,
+      [condition_on_return, returned_by, notes, req.params.id]
     );
-    await addActivity(req.user.full_name, 'checked_in', `Checked in ${tool[0].name}`, 'tool', req.params.id);
+
+    // Audit log entry
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'check_in', 'tool', req.params.id,
+      `Checked in ${tool[0].name} (checked out to: ${checkedOutTo}, returned by: ${returned_by}, condition: ${condition_on_return || 'good'})`);
+
+    await addActivity(req.user.full_name, 'checked_in', `Checked in ${tool[0].name} (returned by: ${returned_by})`, 'tool', req.params.id);
     res.json({ message: 'Tool checked in' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

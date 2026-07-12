@@ -253,9 +253,11 @@ async function createSchema() {
         condition_on_return VARCHAR(50),
         notes TEXT,
         user_id UUID REFERENCES users(id),
+        returned_by VARCHAR(255),
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await client.query(`ALTER TABLE tool_checkout_log ADD COLUMN IF NOT EXISTS returned_by VARCHAR(255)`);
 
     // Project Allocations
     await client.query(`

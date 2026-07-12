@@ -25,8 +25,8 @@ export default function Tools() {
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [checkoutModal, setCheckoutModal] = useState({ open: false, tool: null })
   const [checkoutForm, setCheckoutForm] = useState({ assigned_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
-  const [checkinModal, setCheckinModal] = useState({ open: false, tool: null })
-  const [checkinForm, setCheckinForm] = useState({ condition_on_return: 'good', notes: '' })
+  const [checkinModal, setCheckinModal] = useState({ open: false, tool: null, checkoutRecord: null })
+  const [checkinForm, setCheckinForm] = useState({ condition_on_return: 'good', notes: '', returned_by: '' })
   const [historyModal, setHistoryModal] = useState({ open: false, tool: null, history: [] })
 
   const canManage = ['owner', 'admin', 'store_manager', 'site_engineer', 'manager'].includes(user?.role)
@@ -66,12 +66,24 @@ export default function Tools() {
     } catch (err) { toast.error(err.response?.data?.error || 'Checkout failed') }
   }
 
+  const openCheckin = async (tool) => {
+    try {
+      const { data } = await api.get(`/tools/${tool.id}/checkout-history`)
+      const record = data.find(r => !r.actual_return_date) || null
+      setCheckinModal({ open: true, tool, checkoutRecord: record })
+      setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' })
+    } catch (err) {
+      toast.error('Failed to load checkout info')
+    }
+  }
+
   const handleCheckin = async () => {
+    if (!checkinForm.returned_by) return toast.error('Returned by is required')
     try {
       await api.post(`/tools/${checkinModal.tool.id}/checkin`, checkinForm)
       toast.success('Tool checked in')
-      setCheckinModal({ open: false, tool: null })
-      setCheckinForm({ condition_on_return: 'good', notes: '' })
+      setCheckinModal({ open: false, tool: null, checkoutRecord: null })
+      setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' })
       load(search)
     } catch (err) { toast.error(err.response?.data?.error || 'Checkin failed') }
   }
@@ -132,7 +144,7 @@ export default function Tools() {
                       className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Checkout"><ArrowUpFromLine size={15} /></button>
                   )}
                   {canManage && t.current_status === 'checked_out' && (
-                    <button onClick={() => { setCheckinModal({ open: true, tool: t }); setCheckinForm({ condition_on_return: 'good', notes: '' }) }}
+                    <button onClick={() => openCheckin(t)}
                       className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Checkin"><ArrowDownToLine size={15} /></button>
                   )}
                   {canManage && (
@@ -168,12 +180,17 @@ export default function Tools() {
         </div>
       </Modal>
 
-      <Modal isOpen={checkinModal.open} onClose={() => { setCheckinModal({ open: false, tool: null }); setCheckinForm({ condition_on_return: 'good', notes: '' }) }} title={`Checkin: ${checkinModal.tool?.name}`} size="max-w-sm">
+      <Modal isOpen={checkinModal.open} onClose={() => { setCheckinModal({ open: false, tool: null, checkoutRecord: null }); setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' }) }} title={`Checkin: ${checkinModal.tool?.name}`} size="max-w-sm">
         <div className="space-y-5">
           <div className="bg-emerald-50 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
             <Wrench size={16} className="text-emerald-600" />
             <span className="text-emerald-800">Returning: <strong>{checkinModal.tool?.name}</strong></span>
           </div>
+          <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm space-y-1">
+            <div className="text-slate-600">Checked Out To: <strong className="text-slate-800">{checkinModal.tool?.checked_out_to || '-'}</strong></div>
+            <div className="text-slate-600">Checkout Date: <strong className="text-slate-800">{checkinModal.checkoutRecord?.check_out_date ? new Date(checkinModal.checkoutRecord.check_out_date).toLocaleDateString() : '-'}</strong></div>
+          </div>
+          <Input label="Returned By *" value={checkinForm.returned_by} onChange={e => setCheckinForm({ ...checkinForm, returned_by: e.target.value })} placeholder="Person returning the tool" />
           <Select label="Condition on Return" value={checkinForm.condition_on_return} onChange={e => setCheckinForm({ ...checkinForm, condition_on_return: e.target.value })}>
             <option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option><option value="damaged">Damaged</option>
           </Select>
