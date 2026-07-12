@@ -102,10 +102,16 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
-                        <button onClick={() => setModal({ open: true, item: u })} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="Edit"><Edit3 size={16} /></button>
-                        <button onClick={() => toggleActive(u)} className={`p-1.5 rounded ${u.is_active ? 'hover:bg-red-50 text-red-600' : 'hover:bg-green-50 text-green-600'}`} title={u.is_active ? 'Deactivate' : 'Activate'}>
-                          {u.is_active ? <ShieldOff size={16} /> : <Shield size={16} />}
-                        </button>
+                        {u.role === 'owner' ? (
+                          <span className="text-xs text-slate-400 italic">Protected</span>
+                        ) : (
+                          <>
+                            <button onClick={() => setModal({ open: true, item: u })} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="Edit"><Edit3 size={16} /></button>
+                            <button onClick={() => toggleActive(u)} className={`p-1.5 rounded ${u.is_active ? 'hover:bg-red-50 text-red-600' : 'hover:bg-green-50 text-green-600'}`} title={u.is_active ? 'Deactivate' : 'Activate'}>
+                              {u.is_active ? <ShieldOff size={16} /> : <Shield size={16} />}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
