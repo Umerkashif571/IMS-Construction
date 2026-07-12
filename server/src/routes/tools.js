@@ -74,8 +74,9 @@ router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res
 // Checkout / Checkin
 router.post('/:id/checkout', authenticate, authorize('owner', 'admin', 'store_manager', 'site_engineer'), async (req, res) => {
   try {
-    const { checked_out_to, employee_name, assigned_project_id, expected_return_date, notes } = req.body;
+    let { checked_out_to, employee_name, assigned_project_id, expected_return_date, notes } = req.body;
     if (!checked_out_to) return res.status(400).json({ error: 'Checked out to required' });
+    if (!assigned_project_id) assigned_project_id = null;
     const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1', [req.params.id]);
     if (tool.length === 0) return res.status(404).json({ error: 'Tool not found' });
     await pool.query(
