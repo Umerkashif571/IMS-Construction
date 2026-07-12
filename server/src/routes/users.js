@@ -12,7 +12,7 @@ router.get('/', authenticate, authorize('owner', 'admin'), async (req, res) => {
       'SELECT id, email, full_name, role, phone, is_active, created_at FROM users ORDER BY full_name'
     );
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => {
@@ -33,12 +33,12 @@ router.put('/:id', authenticate, authorize('owner', 'admin'), async (req, res) =
   try {
     const { full_name, role, phone, is_active } = req.body;
     const { rows } = await pool.query(
-      `UPDATE users SET full_name=$1, role=$2, phone=$3, is_active=$4 WHERE id=$5 RETURNING id, email, full_name, role, phone, is_active`,
-      [full_name, role, phone, is_active, req.params.id]
+      `UPDATE users SET full_name=COALESCE($1, full_name), role=COALESCE($2, role), phone=COALESCE($3, phone), is_active=COALESCE($4, is_active) WHERE id=$5 RETURNING id, email, full_name, role, phone, is_active`,
+      [full_name ?? null, role ?? null, phone ?? null, is_active ?? null, req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json(rows[0]);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Audit logs
