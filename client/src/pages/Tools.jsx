@@ -24,7 +24,7 @@ export default function Tools() {
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [checkoutModal, setCheckoutModal] = useState({ open: false, tool: null })
-  const [checkoutForm, setCheckoutForm] = useState({ assigned_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
+  const [checkoutForm, setCheckoutForm] = useState({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
   const [checkinModal, setCheckinModal] = useState({ open: false, tool: null, checkoutRecord: null })
   const [checkinForm, setCheckinForm] = useState({ condition_on_return: 'good', notes: '', returned_by: '' })
   const [historyModal, setHistoryModal] = useState({ open: false, tool: null, history: [] })
@@ -56,12 +56,12 @@ export default function Tools() {
   }
 
   const handleCheckout = async () => {
-    if (!checkoutForm.assigned_to) return toast.error('Assign to is required')
+    if (!checkoutForm.checked_out_to) return toast.error('Assign to is required')
     try {
       await api.post(`/tools/${checkoutModal.tool.id}/checkout`, checkoutForm)
       toast.success('Tool checked out')
       setCheckoutModal({ open: false, tool: null })
-      setCheckoutForm({ assigned_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
+      setCheckoutForm({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' })
       load(search)
     } catch (err) { toast.error(err.response?.data?.error || 'Checkout failed') }
   }
@@ -140,7 +140,7 @@ export default function Tools() {
               <Td align="center">
                 <div className="flex items-center justify-center gap-1">
                   {canManage && t.current_status === 'available' && (
-                    <button onClick={() => { setCheckoutModal({ open: true, tool: t }); setCheckoutForm({ assigned_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' }) }}
+                    <button onClick={() => { setCheckoutModal({ open: true, tool: t }); setCheckoutForm({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' }) }}
                       className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Checkout"><ArrowUpFromLine size={15} /></button>
                   )}
                   {canManage && t.current_status === 'checked_out' && (
@@ -166,13 +166,13 @@ export default function Tools() {
       </Modal>
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Are you sure you want to delete this tool?" />
 
-      <Modal isOpen={checkoutModal.open} onClose={() => { setCheckoutModal({ open: false, tool: null }); setCheckoutForm({ assigned_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' }) }} title={`Checkout: ${checkoutModal.tool?.name}`} size="max-w-sm">
+      <Modal isOpen={checkoutModal.open} onClose={() => { setCheckoutModal({ open: false, tool: null }); setCheckoutForm({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' }) }} title={`Checkout: ${checkoutModal.tool?.name}`} size="max-w-sm">
         <div className="space-y-5">
           <div className="bg-blue-50 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
             <Wrench size={16} className="text-blue-600" />
             <span className="text-blue-800">Status: <strong>{checkoutModal.tool?.current_status}</strong></span>
           </div>
-          <Input label="Assigned To *" value={checkoutForm.assigned_to} onChange={e => setCheckoutForm({ ...checkoutForm, assigned_to: e.target.value })} placeholder="Person name" />
+          <Input label="Assigned To *" value={checkoutForm.checked_out_to} onChange={e => setCheckoutForm({ ...checkoutForm, checked_out_to: e.target.value })} placeholder="Person name" />
           <Input label="Employee Name" value={checkoutForm.employee_name} onChange={e => setCheckoutForm({ ...checkoutForm, employee_name: e.target.value })} placeholder="Optional" />
           <Input label="Expected Return" type="date" value={checkoutForm.expected_return_date} onChange={e => setCheckoutForm({ ...checkoutForm, expected_return_date: e.target.value })} />
           <Input label="Notes" value={checkoutForm.notes} onChange={e => setCheckoutForm({ ...checkoutForm, notes: e.target.value })} placeholder="Optional notes" />
