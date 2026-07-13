@@ -166,7 +166,11 @@ router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_ma
         const anyReceived = items.some(i => parseFloat(i.quantity_delivered || 0) > 0);
         const newPoStatus = allReceived ? 'received' : (anyReceived ? 'partial_received' : null);
         if (newPoStatus) {
-          await pool.query('UPDATE purchase_orders SET status=$1, received_by=$2, updated_at=NOW() WHERE id=$3', [newPoStatus, req.user.full_name, po_id]);
+          const deliveryMap = { 'received': 'delivered', 'partial_received': 'partial' };
+          await pool.query(
+            'UPDATE purchase_orders SET status=$1, delivery_status=$2, received_by=$3, updated_at=NOW() WHERE id=$4',
+            [newPoStatus, deliveryMap[newPoStatus] || 'pending', req.user.full_name, po_id]
+          );
           poStatus = newPoStatus;
         }
       }

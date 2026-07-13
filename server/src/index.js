@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const path = require('path');
 
 const { createSchema } = require('./db/schema');
+const pool = require('./db/pool');
 const { seedDatabase } = require('./db/seed');
 const { router: backupRouter, dumpWithoutPgDump } = require('./routes/backup');
 const BACKUP_DIR = path.join(__dirname, '..', 'backups');
@@ -75,6 +76,23 @@ cron.schedule('0 2 * * *', async () => {
 
 async function start() {
   try { await createSchema(); } catch (e) { console.error('Schema error:', e.message); }
+  try {
+    await pool.query(`
+      UPDATE purchase_orders SET delivery_status = CASE status
+        WHEN 'received' THEN 'delivered'
+        WHEN 'partial_received' THEN 'partial'
+        WHEN 'cancelled' THEN 'cancelled'
+        ELSE 'pending'
+      END
+      WHERE delivery_status IS DISTINCT FROM CASE status
+        WHEN 'received' THEN 'delivered'
+        WHEN 'partial_received' THEN 'partial'
+        WHEN 'cancelled' THEN 'cancelled'
+        ELSE 'pending'
+      END
+    `);
+    console.log('Delivery status migration: done');
+  } catch (e) { console.error('Delivery status migration error:', e.message); }
   try { await seedDatabase(); } catch (e) { console.error('Seed error:', e.message); }
   app.listen(PORT, () => {
     console.log(`IMS Server running on port ${PORT}`);

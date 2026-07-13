@@ -46,11 +46,13 @@ router.put('/:id/status', authenticate, authorize('owner', 'admin', 'store_manag
     if (status === 'approved' && !['owner', 'admin'].includes(req.user.role))
       return res.status(403).json({ error: 'Only owners and admins can approve POs' });
 
-    let updateFields = 'status=$1, updated_at=NOW()';
-    const params = [status];
+    const deliveryMap = { 'received': 'delivered', 'partial_received': 'partial', 'cancelled': 'cancelled' };
+    let deliveryStatus = deliveryMap[status] || 'pending';
+    let updateFields = 'status=$1, delivery_status=$2, updated_at=NOW()';
+    const params = [status, deliveryStatus];
 
     if (status === 'received') {
-      updateFields += ', received_by=$2';
+      updateFields += ', received_by=$3';
       params.push(req.user.full_name);
     }
 
