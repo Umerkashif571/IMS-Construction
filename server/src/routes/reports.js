@@ -148,7 +148,7 @@ router.get('/vendor-purchases', authenticate, async (req, res) => {
   try {
     const { vendor_id, format } = req.query;
     let sql = `SELECT po.po_number, po.order_date, po.total_amount, po.status, po.delivery_status, v.name as vendor
-               FROM purchase_orders po JOIN vendors v ON po.vendor_id=v.id WHERE po.status IN ('approved','ordered','completed')`;
+               FROM purchase_orders po JOIN vendors v ON po.vendor_id=v.id WHERE po.status NOT IN ('draft', 'cancelled', 'rejected')`;
     const params = [];
     if (vendor_id) { sql += ' AND po.vendor_id=$1'; params.push(vendor_id); }
     sql += ' ORDER BY po.order_date DESC';
