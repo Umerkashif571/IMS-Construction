@@ -141,4 +141,40 @@ router.put('/pos/:id/delivery', authenticate, authorize('owner', 'admin', 'store
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
+// Create PO for a specific vendor (POST /vendors/:id/purchase-orders)
+router.post('/:id/purchase-orders', authenticate, authorize('owner', 'admin', 'procurement_officer', 'store_manager'), async (req, res) => {
+  try {
+    const { items, notes } = req.body;
+    if (!items || items.length === 0) return res.status(400).json({ error: 'Items required' });
+
+    const { rows: vendor } = await pool.query('SELECT name FROM vendors WHERE id=$1', [req.params.id]);
+    if (vendor.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+
+    const poNum = 'PO-' + Date.now();
+    const total_amount = items.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price)), 0);
+
+    const { rows: po } = await pool.query(
+      `INSERT INTO purchase_orders (po_number, vendor_id, vendor_name, total_amount, notes, created_by, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
+      [poNum, req.params.id, vendor[0].name, total_amount, notes || null, req.user.id]
+    );
+
+    for (const item of items) {
+      await pool.query(
+        `INSERT INTO purchase_order_items (po_id, material_name, quantity, unit, unit_price, total_price)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [po[0].id, item.material_name, parseFloat(item.quantity) || 0, item.unit || 'pcs', parseFloat(item.unit_price) || 0,
+         (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)]
+      );
+    }
+
+    // Fetch PO with items to return
+    const { rows: items_ } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [po[0].id]);
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id,
+      `Created PO ${poNum} for ${vendor[0].name} (${total_amount})`);
+    await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendor[0].name}`, 'purchase_order', po[0].id);
+    res.status(201).json({ ...po[0], items: items_ });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;

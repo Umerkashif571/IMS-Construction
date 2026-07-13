@@ -113,7 +113,7 @@ router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res
 // Stock IN (atomic, TOCTOU-safe)
 router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_manager', 'manager', 'staff'), async (req, res) => {
   try {
-    const { quantity, notes, warehouse_id, source, received_by, transaction_type, date } = req.body;
+    const { quantity, notes, warehouse_id, source, received_by, transaction_type, date, po_id } = req.body;
     if (!quantity || parseFloat(quantity) <= 0) return res.status(400).json({ error: 'Valid quantity required' });
     if (!warehouse_id) return res.status(400).json({ error: 'Warehouse is required' });
 
@@ -137,9 +137,9 @@ router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_ma
 
       const txnDate = date ? new Date(date) : new Date();
       await client.query(
-        `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, added_by, notes, source, received_by, transaction_type, date)
-         VALUES ($1, 'in', $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [req.params.id, qty, newQty, warehouse_id, req.user.full_name, notes || null, source || null, received_by || null, transaction_type || null, txnDate]
+        `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, added_by, notes, source, received_by, transaction_type, date, po_id)
+         VALUES ($1, 'in', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [req.params.id, qty, newQty, warehouse_id, req.user.full_name, notes || null, source || null, received_by || null, transaction_type || null, txnDate, po_id || null]
       );
 
       await client.query(
@@ -148,13 +148,34 @@ router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_ma
         [req.params.id, mat[0].name, 'in', qty, mat[0].unit, notes, req.user.id, req.user.full_name]
       );
 
+      // If linked to a PO, update delivery tracking
+      if (po_id) {
+        await client.query(
+          'UPDATE purchase_order_items SET quantity_delivered = quantity_delivered + $1 WHERE po_id=$2 AND material_name=$3',
+          [qty, po_id, mat[0].name]
+        );
+      }
+
       await client.query('COMMIT');
 
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'stock_in', 'material', req.params.id,
-        `Stock in: ${qty} ${mat[0].unit} of ${mat[0].name}. Running total: ${newQty}`);
-      await addActivity(req.user.full_name, 'stock_in', `Added ${qty} ${mat[0].unit} of ${mat[0].name} to stock (running total: ${newQty})`, 'material', req.params.id);
+      // After commit, check PO status if linked
+      let poStatus = null;
+      if (po_id) {
+        const { rows: items } = await pool.query('SELECT quantity, quantity_delivered FROM purchase_order_items WHERE po_id=$1', [po_id]);
+        const allReceived = items.every(i => parseFloat(i.quantity_delivered || 0) >= parseFloat(i.quantity));
+        const anyReceived = items.some(i => parseFloat(i.quantity_delivered || 0) > 0);
+        const newPoStatus = allReceived ? 'received' : (anyReceived ? 'partial_received' : null);
+        if (newPoStatus) {
+          await pool.query('UPDATE purchase_orders SET status=$1, received_by=$2, updated_at=NOW() WHERE id=$3', [newPoStatus, req.user.full_name, po_id]);
+          poStatus = newPoStatus;
+        }
+      }
 
-      res.json({ message: 'Stock in recorded', new_quantity: newQty, transaction: { quantity: qty, running_total: newQty } });
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'stock_in', 'material', req.params.id,
+        `Stock in: ${qty} ${mat[0].unit} of ${mat[0].name}. Running total: ${newQty}${po_id ? ' (PO linked)' : ''}`);
+      await addActivity(req.user.full_name, 'stock_in', `Added ${qty} ${mat[0].unit} of ${mat[0].name} to stock (running total: ${newQty})${poStatus ? '. PO status: ' + poStatus : ''}`, 'material', req.params.id);
+
+      res.json({ message: 'Stock in recorded', new_quantity: newQty, transaction: { quantity: qty, running_total: newQty, po_id }, po_status: poStatus });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

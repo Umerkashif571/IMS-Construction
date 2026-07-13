@@ -19,7 +19,8 @@ export default function Materials() {
   const [detailModal, setDetailModal] = useState({ open: false, material: null, transactions: [] })
   const [dateFilter, setDateFilter] = useState({ mode: 'all', from: '', to: '' })
   const [stockInModal, setStockInModal] = useState({ open: false, material: null })
-  const [stockInQty, setStockInQty] = useState({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '' })
+  const [stockInQty, setStockInQty] = useState({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' })
+  const [availablePos, setAvailablePos] = useState([])
   const [stockOutModal, setStockOutModal] = useState({ open: false, material: null })
   const [stockOutForm, setStockOutForm] = useState({ quantity: '', project_id: '', warehouse_id: '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' })
   const [gpPopup, setGpPopup] = useState({ open: false, gp: null })
@@ -90,10 +91,21 @@ export default function Materials() {
     if (!stockInQty.quantity || parseFloat(stockInQty.quantity) <= 0) return toast.error('Enter valid quantity')
     if (!stockInQty.warehouse_id) return toast.error('Warehouse is required')
     try {
-      await api.post(`/materials/${stockInModal.material.id}/stock-in`, { quantity: parseFloat(stockInQty.quantity), warehouse_id: stockInQty.warehouse_id, notes: stockInQty.notes, source: stockInQty.source, received_by: stockInQty.received_by, transaction_type: stockInQty.transaction_type, date: stockInQty.date })
+      const payload = {
+        quantity: parseFloat(stockInQty.quantity),
+        warehouse_id: stockInQty.warehouse_id,
+        notes: stockInQty.notes,
+        source: stockInQty.source,
+        received_by: stockInQty.received_by,
+        transaction_type: stockInQty.transaction_type,
+        date: stockInQty.date
+      }
+      if (stockInQty.po_id) payload.po_id = stockInQty.po_id
+      await api.post(`/materials/${stockInModal.material.id}/stock-in`, payload)
       toast.success('Stock in recorded')
       setStockInModal({ open: false, material: null })
-      setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '' })
+      setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' })
+      setAvailablePos([])
       load(search)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock in') }
   }
@@ -188,7 +200,11 @@ export default function Materials() {
                 <div className="flex items-center justify-center gap-1">
                   {canEdit && (
                     <>
-                      <button onClick={() => { setStockInModal({ open: true, material: m }); setStockInQty({ quantity: '', warehouse_id: m.warehouse_id || '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '' }) }} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Stock In"><ArrowDownToLine size={15} /></button>
+                      <button onClick={() => {
+  setStockInModal({ open: true, material: m });
+  setStockInQty({ quantity: '', warehouse_id: m.warehouse_id || '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' });
+  api.get('/purchase-orders').then(({ data }) => setAvailablePos((data || []).filter(p => ['approved', 'partial_received'].includes(p.status)))).catch(() => {});
+}} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Stock In"><ArrowDownToLine size={15} /></button>
                       <button onClick={() => { setStockOutModal({ open: true, material: m }); setStockOutForm({ quantity: '', project_id: '', warehouse_id: m.warehouse_id || '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' }) }} className="p-1.5 hover:bg-amber-50 rounded text-amber-600 transition-colors" title="Stock Out"><ArrowUpFromLine size={15} /></button>
                       <button onClick={() => setModal({ open: true, item: m })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
                       <button onClick={() => setDeleteConfirm({ open: true, id: m.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
@@ -290,7 +306,7 @@ export default function Materials() {
         )}
       </Modal>
 
-      <Modal isOpen={stockInModal.open} onClose={() => { setStockInModal({ open: false, material: null }); setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '' }) }} title={`Stock In: ${stockInModal.material?.name}`} size="max-w-sm">
+      <Modal isOpen={stockInModal.open} onClose={() => { setStockInModal({ open: false, material: null }); setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' }); setAvailablePos([]) }} title={`Stock In: ${stockInModal.material?.name}`} size="max-w-sm">
         <div className="space-y-5">
           <div className="bg-emerald-50 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
             <Package size={16} className="text-emerald-600" />
@@ -300,6 +316,12 @@ export default function Materials() {
           <Select label="Warehouse / Location *" value={stockInQty.warehouse_id} onChange={e => setStockInQty({ ...stockInQty, warehouse_id: e.target.value })}>
             <option value="">Select warehouse</option>
             {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}{w.location ? ` - ${w.location}` : ''}</option>)}
+          </Select>
+          <Select label="Linked PO (optional)" value={stockInQty.po_id} onChange={e => setStockInQty({ ...stockInQty, po_id: e.target.value })}>
+            <option value="">No PO link</option>
+            {availablePos.filter(p => p.status === 'approved' || p.status === 'partial_received').map(p => (
+              <option key={p.id} value={p.id}>{p.po_number} - {p.vendor_name} (PKR {(parseFloat(p.total_amount) || 0).toLocaleString()})</option>
+            ))}
           </Select>
           <Select label="Source *" value={stockInQty.source} onChange={e => setStockInQty({ ...stockInQty, source: e.target.value })}>
             <option value="">Select source</option>

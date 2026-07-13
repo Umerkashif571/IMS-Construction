@@ -313,7 +313,7 @@ async function createSchema() {
         order_date TIMESTAMPTZ DEFAULT NOW(),
         expected_delivery DATE,
         delivery_status VARCHAR(50) DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'partial', 'delivered', 'cancelled')),
-        status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'approved', 'rejected', 'ordered', 'completed')),
+        status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('draft', 'pending', 'pending_approval', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled')),
         total_amount DECIMAL(15,2) DEFAULT 0,
         notes TEXT,
         created_by UUID REFERENCES users(id),
@@ -412,6 +412,38 @@ async function createSchema() {
           WHERE table_name='material_transactions' AND column_name='transaction_type'
         ) THEN
           ALTER TABLE material_transactions ADD COLUMN transaction_type VARCHAR(100);
+        END IF;
+      END $$;
+    `);
+
+    // Add po_id and received_by to purchase_orders if missing
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='purchase_orders' AND column_name='received_by'
+        ) THEN
+          ALTER TABLE purchase_orders ADD COLUMN received_by VARCHAR(255);
+        END IF;
+      END $$;
+    `);
+    // Update CHECK constraint for purchase_orders.status to include new statuses
+    await client.query(`
+      ALTER TABLE purchase_orders DROP CONSTRAINT IF EXISTS purchase_orders_status_check;
+    `);
+    await client.query(`
+      ALTER TABLE purchase_orders ADD CONSTRAINT purchase_orders_status_check
+        CHECK (status IN ('draft', 'pending', 'pending_approval', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled'));
+    `);
+
+    // Add po_id to material_transactions for linking stock-in to PO
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='material_transactions' AND column_name='po_id'
+        ) THEN
+          ALTER TABLE material_transactions ADD COLUMN po_id UUID REFERENCES purchase_orders(id);
         END IF;
       END $$;
     `);
