@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import logo from '../assets/logo.jpg'
+import footerImg from '../assets/banner-text.jpg'
 import {
   LayoutDashboard, Package, Truck, Wrench, Building2, Store, Warehouse,
   BarChart3, Users, Shield, Ticket, LogOut, Menu, Bell, ChevronLeft,
@@ -97,6 +98,14 @@ export default function Layout() {
         >
           <ChevronLeft size={16} className={`transition-transform ${collapsed ? 'rotate-180' : ''}`} />
         </button>
+
+        {/* Footer banner */}
+        {!collapsed && (
+          <div className="border-t border-slate-700/50 px-3 py-3">
+            <img src={footerImg} alt="Banner" className="w-full h-16 object-cover rounded" />
+            <p className="text-[10px] text-slate-400 text-center mt-1.5">Building Excellence Since Day One</p>
+          </div>
+        )}
 
         {/* User area */}
         <div className={`border-t border-slate-700/50 p-3 ${collapsed ? 'text-center' : ''}`}>

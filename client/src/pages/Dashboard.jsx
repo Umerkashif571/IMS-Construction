@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package } from 'lucide-react'
+import bannerImg from '../assets/banner-collage.jpg'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import api from '../api'
 import { StatCard, Card, CardHeader, CardContent, LoadingSkeleton, EmptyState } from '../components/ui'
@@ -54,6 +55,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <div className="w-full h-44 rounded-xl overflow-hidden" style={{ backgroundImage: `url(${bannerImg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+      </div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Dashboard</h1>
