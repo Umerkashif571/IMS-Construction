@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import logo from '../assets/logo.jpg'
 import toast from 'react-hot-toast'
 
 export default function Login() {
@@ -28,11 +29,11 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-yellow-400 rounded-2xl mb-4">
-            <span className="text-3xl font-bold text-blue-900">I</span>
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-white rounded-2xl mb-4 overflow-hidden p-1">
+            <img src={logo} alt="Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-3xl font-bold text-white">IMS</h1>
-          <p className="text-blue-200 mt-1">Inventory & Asset Management System</p>
+          <h1 className="text-3xl font-bold text-white">Al Shafi Enterprises</h1>
+          <p className="text-blue-200 mt-1">Asset Management</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
