@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import logo from '../assets/logo.jpg'
 import {
   LayoutDashboard, Package, Truck, Wrench, Building2, Store, Warehouse,
   BarChart3, Users, Shield, Ticket, LogOut, Menu, Bell, ChevronLeft,
@@ -58,12 +59,12 @@ export default function Layout() {
 
         {/* Logo */}
         <div className={`flex items-center border-b border-slate-700/50 h-16 ${collapsed ? 'justify-center px-0' : 'px-5'}`}>
-          <div className="w-9 h-9 bg-amber-500 rounded-lg flex items-center justify-center text-slate-900 font-bold text-base flex-shrink-0">
-            {collapsed ? 'I' : 'IMS'}
+          <div className="w-9 h-9 bg-white rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden p-0.5">
+            <img src={logo} alt="Logo" className="w-full h-full object-contain" />
           </div>
           {!collapsed && (
             <div className="ml-3 min-w-0">
-              <h1 className="font-bold text-sm leading-tight text-white">IMS</h1>
+              <h1 className="font-bold text-sm leading-tight text-white">Al Shafi Enterprises</h1>
               <p className="text-slate-400 text-[10px] leading-tight">Asset Management</p>
             </div>
           )}
