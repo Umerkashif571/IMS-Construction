@@ -24,6 +24,7 @@ const reportRoutes = require('./routes/reports');
 const dashboardRoutes = require('./routes/dashboard');
 const userRoutes = require('./routes/users');
 const gatepassRoutes = require('./routes/gatepass');
+const financeRoutes = require('./routes/finance');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,6 +60,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/backup', backupRouter);
 app.use('/api/gatepass', gatepassRoutes);
+app.use('/api/projects/:projectId/finance', financeRoutes);
 
 // Scheduled daily backup at 2:00 AM
 cron.schedule('0 2 * * *', async () => {

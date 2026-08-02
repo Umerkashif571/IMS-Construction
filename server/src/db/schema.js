@@ -15,12 +15,18 @@ async function createSchema() {
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         full_name VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL CHECK (role IN ('owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff')),
+        role VARCHAR(50) NOT NULL CHECK (role IN ('owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance')),
         phone VARCHAR(50),
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+    // Update users.role CHECK constraint to include 'finance'
+    await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
+    await client.query(`
+      ALTER TABLE users ADD CONSTRAINT users_role_check
+        CHECK (role IN ('owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'))
     `);
 
     // Audit Log
@@ -76,6 +82,17 @@ async function createSchema() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+    // Add project_cost_value to projects if missing (total budget/contract value)
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='projects' AND column_name='project_cost_value'
+        ) THEN
+          ALTER TABLE projects ADD COLUMN project_cost_value DECIMAL(15, 2) DEFAULT 0;
+        END IF;
+      END $$;
     `);
 
     // Warehouses / Sites
@@ -446,6 +463,75 @@ async function createSchema() {
           ALTER TABLE material_transactions ADD COLUMN po_id UUID REFERENCES purchase_orders(id);
         END IF;
       END $$;
+    `);
+
+    // ============ FINANCE MODULE ============
+
+    // Salaries
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS salaries (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        project_id UUID REFERENCES projects(id) NOT NULL,
+        employee_name VARCHAR(255) NOT NULL,
+        amount DECIMAL(15, 2) NOT NULL,
+        month DATE NOT NULL,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
+    `);
+
+    // Petty Cash
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS petty_cash (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        project_id UUID REFERENCES projects(id) NOT NULL,
+        description VARCHAR(255) NOT NULL,
+        amount DECIMAL(15, 2) NOT NULL,
+        week_of DATE NOT NULL,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
+    `);
+
+    // Vendor Payments
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_payments (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        project_id UUID REFERENCES projects(id) NOT NULL,
+        vendor_id UUID REFERENCES vendors(id) NOT NULL,
+        payment_type VARCHAR(50) NOT NULL CHECK (payment_type IN ('fixed_otp', 'continuous', 'ipc')),
+        amount DECIMAL(15, 2) NOT NULL,
+        po_number VARCHAR(255),
+        bill_number VARCHAR(255),
+        ipc_percent_complete DECIMAL(5, 2),
+        payment_date DATE NOT NULL,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
+    `);
+
+    // Deletion Requests (approval workflow for finance transactions)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS deletion_requests (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment')),
+        transaction_id UUID NOT NULL,
+        project_id UUID REFERENCES projects(id) NOT NULL,
+        requested_by UUID REFERENCES users(id),
+        reason TEXT,
+        admin_approval VARCHAR(20) DEFAULT 'pending' CHECK (admin_approval IN ('pending', 'approved', 'rejected')),
+        admin_approved_by UUID REFERENCES users(id),
+        admin_approved_at TIMESTAMPTZ,
+        owner_approval VARCHAR(20) DEFAULT 'pending' CHECK (owner_approval IN ('pending', 'approved', 'rejected')),
+        owner_approved_by UUID REFERENCES users(id),
+        owner_approved_at TIMESTAMPTZ,
+        final_status VARCHAR(20) DEFAULT 'pending' CHECK (final_status IN ('pending', 'approved', 'rejected')),
+        snapshot_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
     `);
 
     // Activity Feed (denormalized for dashboard performance)

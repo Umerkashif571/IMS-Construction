@@ -26,7 +26,8 @@ async function seedDatabase() {
         ('procurement@ims.com', $1, 'Sana Tariq', 'procurement_officer', '0303-4567890'),
         ('owner@ims.com', $1, 'Owner User', 'owner', '0304-5678901'),
         ('manager@ims.com', $1, 'Manager User', 'manager', '0305-6789012'),
-        ('staff@ims.com', $1, 'Staff User', 'staff', '0306-7890123')
+        ('staff@ims.com', $1, 'Staff User', 'staff', '0306-7890123'),
+        ('finance@ims.com', $1, 'Finance User', 'finance', '0307-8901234')
       RETURNING id, email, full_name, role
     `, [hashedPassword]);
     console.log('Users seeded');

@@ -66,12 +66,14 @@ router.get('/:id/material-cost', authenticate, async (req, res) => {
 
 router.post('/', authenticate, authorize('owner', 'admin', 'site_engineer'), async (req, res) => {
   try {
-    const { name, client, location, city, start_date, end_date, status, description } = req.body;
+    const { name, client, location, city, start_date, end_date, status, description, project_cost_value } = req.body;
     if (!name) return res.status(400).json({ error: 'Name required' });
+    const costValue = parseFloat(project_cost_value);
+    const pcv = isNaN(costValue) || costValue < 0 ? 0 : costValue;
     const { rows } = await pool.query(
-      `INSERT INTO projects (name, client, location, city, start_date, end_date, status, description)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [name, client, location, city, start_date, end_date, status || 'planning', description]
+      `INSERT INTO projects (name, client, location, city, start_date, end_date, status, description, project_cost_value)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [name, client, location, city, start_date, end_date, status || 'planning', description, pcv]
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'project', rows[0].id, `Created project: ${name}`);
     await addActivity(req.user.full_name, 'created', `Created project: ${name}`, 'project', rows[0].id);
@@ -81,11 +83,13 @@ router.post('/', authenticate, authorize('owner', 'admin', 'site_engineer'), asy
 
 router.put('/:id', authenticate, authorize('owner', 'admin', 'site_engineer'), async (req, res) => {
   try {
-    const { name, client, location, city, start_date, end_date, status, description } = req.body;
+    const { name, client, location, city, start_date, end_date, status, description, project_cost_value } = req.body;
+    const costValue = parseFloat(project_cost_value);
+    const pcv = isNaN(costValue) || costValue < 0 ? 0 : costValue;
     const { rows } = await pool.query(
-      `UPDATE projects SET name=$1, client=$2, location=$3, city=$4, start_date=$5, end_date=$6, status=$7, description=$8, updated_at=NOW()
-       WHERE id=$9 RETURNING *`,
-      [name, client, location, city, start_date, end_date, status, description, req.params.id]
+      `UPDATE projects SET name=$1, client=$2, location=$3, city=$4, start_date=$5, end_date=$6, status=$7, description=$8, project_cost_value=$9, updated_at=NOW()
+       WHERE id=$10 RETURNING *`,
+      [name, client, location, city, start_date, end_date, status, description, pcv, req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'updated', 'project', rows[0].id, `Updated project: ${name}`);

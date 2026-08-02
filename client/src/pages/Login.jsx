@@ -79,6 +79,7 @@ export default function Login() {
                   { role: 'Store Manager', email: 'store@ims.com', badge: 'bg-blue-100 text-blue-700' },
                   { role: 'Site Engineer', email: 'engineer@ims.com', badge: 'bg-green-100 text-green-700' },
                   { role: 'Procurement', email: 'procurement@ims.com', badge: 'bg-purple-100 text-purple-700' },
+                  { role: 'Finance', email: 'finance@ims.com', badge: 'bg-teal-100 text-teal-700' },
                 ].map(d => (
                   <div key={d.email} className={`p-2 rounded-lg ${d.badge}`}>
                     <div className="font-medium">{d.role}</div>

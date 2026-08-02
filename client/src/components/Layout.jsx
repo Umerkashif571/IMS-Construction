@@ -10,11 +10,11 @@ import {
 } from 'lucide-react'
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff'] },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'] },
   { to: '/materials', label: 'Materials', icon: Package, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff'] },
   { to: '/vehicles', label: 'Vehicles', icon: Truck, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff'] },
   { to: '/tools', label: 'Tools & Equipment', icon: Wrench, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff'] },
-  { to: '/projects', label: 'Projects', icon: Building2, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff'] },
+  { to: '/projects', label: 'Projects', icon: Building2, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'] },
   { to: '/vendors', label: 'Vendors', icon: Store, roles: ['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff'] },
   { to: '/warehouses', label: 'Warehouses', icon: Warehouse, roles: ['owner', 'admin', 'store_manager', 'manager', 'staff'] },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff'] },
@@ -35,12 +35,12 @@ export default function Layout() {
     owner: 'bg-purple-100 text-purple-800', admin: 'bg-red-100 text-red-800',
     store_manager: 'bg-blue-100 text-blue-800', site_engineer: 'bg-green-100 text-green-800',
     procurement_officer: 'bg-purple-100 text-purple-800', manager: 'bg-indigo-100 text-indigo-800',
-    staff: 'bg-amber-100 text-amber-800',
+    staff: 'bg-amber-100 text-amber-800', finance: 'bg-teal-100 text-teal-800',
   }
   const roleLabelMap = {
     owner: 'Owner', admin: 'Admin', store_manager: 'Store Manager',
     site_engineer: 'Site Engineer', procurement_officer: 'Procurement',
-    manager: 'Manager', staff: 'Staff',
+    manager: 'Manager', staff: 'Staff', finance: 'Finance',
   }
 
   const visibleItems = navItems.filter(item => item.roles.includes(user?.role))

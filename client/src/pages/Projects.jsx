@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
-import { Plus, Search, Building2, Edit3, Trash2, ExternalLink, Package } from 'lucide-react'
+import ProjectFinance from '../components/ProjectFinance'
+import { Plus, Search, Building2, Edit3, Trash2, ExternalLink, Package, Construction } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const statusBadge = (s) => {
@@ -20,6 +21,7 @@ export default function Projects() {
   const [allocModal, setAllocModal] = useState({ open: false, project: null })
   const [allocData, setAllocData] = useState({ materials: [], vehicles: [], tools: [] })
   const [detailModal, setDetailModal] = useState({ open: false, project: null, materials: [] })
+  const [detailTab, setDetailTab] = useState('overview')
 
   const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
 
@@ -44,6 +46,7 @@ export default function Projects() {
   }
 
   const openDetail = async (project) => {
+    setDetailTab('overview')
     try {
       const [projRes, matCostRes] = await Promise.all([api.get(`/projects/${project.id}`), api.get(`/projects/${project.id}/material-cost`)])
       setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data })
@@ -121,45 +124,74 @@ export default function Projects() {
       </Modal>
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this project?" />
 
-      <Modal isOpen={detailModal.open} onClose={() => setDetailModal({ open: false, project: null, materials: [] })} title={detailModal.project?.name || 'Project Details'} size="max-w-3xl">
+      <Modal isOpen={detailModal.open} onClose={() => setDetailModal({ open: false, project: null, materials: [] })} title={detailModal.project?.name || 'Project Details'} size="max-w-4xl">
         {detailModal.project && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 rounded-xl p-5">
+            <div className="flex gap-2 border-b border-slate-100 pb-3">
               {[
-                ['Client', detailModal.project.client], ['Location', [detailModal.project.location, detailModal.project.city].filter(Boolean).join(', ')], ['Status', statusBadge(detailModal.project.status)], ['Total Material Invested', <span className="text-lg font-bold text-emerald-600">PKR {(parseFloat(detailModal.project.total_material_cost) || 0).toLocaleString()}</span>],
-              ].map(([label, value]) => (
-                <div key={label}><span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{label}</span><span className="text-sm font-semibold text-slate-800">{value || '-'}</span></div>
+                { key: 'overview', label: 'Overview' },
+                { key: 'finance', label: 'Finance' },
+                { key: 'supply_chain', label: 'Supply Chain Management' },
+              ].map(t => (
+                <button key={t.key} onClick={() => setDetailTab(t.key)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${detailTab === t.key ? 'bg-amber-500 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                  {t.label}
+                </button>
               ))}
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-700 mb-3">Material Cost Breakdown</h3>
-              {detailModal.materials.length === 0 ? (
-                <EmptyState icon={Package} title="No materials issued" text="Materials issued to this project will appear here" />
-              ) : (
-                <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50"><tr>
-                      {['Material', 'SKU', 'Qty Used', 'Unit', 'Unit Cost', 'Total Cost'].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}
-                    </tr></thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {detailModal.materials.map(m => (
-                        <tr key={m.material_id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-medium">{m.material_name}</td>
-                          <td className="px-4 py-2.5 text-slate-500 font-mono text-xs">{m.sku || '-'}</td>
-                          <td className="px-4 py-2.5">{(parseFloat(m.total_quantity) || 0).toLocaleString()}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{m.unit || '-'}</td>
-                          <td className="px-4 py-2.5">PKR {(parseFloat(m.unit_cost) || 0).toLocaleString()}</td>
-                          <td className="px-4 py-2.5 font-semibold">PKR {(parseFloat(m.total_cost) || 0).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-slate-50 font-medium">
-                      <tr><td colSpan={5} className="px-4 py-2.5 text-right text-slate-700">Total:</td><td className="px-4 py-2.5 text-emerald-600 font-bold">PKR {detailModal.materials.reduce((s, m) => s + (parseFloat(m.total_cost) || 0), 0).toLocaleString()}</td></tr>
-                    </tfoot>
-                  </table>
+
+            {detailTab === 'overview' && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 rounded-xl p-5">
+                  {[
+                    ['Client', detailModal.project.client], ['Location', [detailModal.project.location, detailModal.project.city].filter(Boolean).join(', ')], ['Status', statusBadge(detailModal.project.status)], ['Total Material Invested', <span className="text-lg font-bold text-emerald-600">PKR {(parseFloat(detailModal.project.total_material_cost) || 0).toLocaleString()}</span>],
+                  ].map(([label, value]) => (
+                    <div key={label}><span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{label}</span><span className="text-sm font-semibold text-slate-800">{value || '-'}</span></div>
+                  ))}
                 </div>
-              )}
-            </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-700 mb-3">Material Cost Breakdown</h3>
+                  {detailModal.materials.length === 0 ? (
+                    <EmptyState icon={Package} title="No materials issued" text="Materials issued to this project will appear here" />
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50"><tr>
+                          {['Material', 'SKU', 'Qty Used', 'Unit', 'Unit Cost', 'Total Cost'].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}
+                        </tr></thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {detailModal.materials.map(m => (
+                            <tr key={m.material_id} className="hover:bg-slate-50">
+                              <td className="px-4 py-2.5 font-medium">{m.material_name}</td>
+                              <td className="px-4 py-2.5 text-slate-500 font-mono text-xs">{m.sku || '-'}</td>
+                              <td className="px-4 py-2.5">{(parseFloat(m.total_quantity) || 0).toLocaleString()}</td>
+                              <td className="px-4 py-2.5 text-slate-500">{m.unit || '-'}</td>
+                              <td className="px-4 py-2.5">PKR {(parseFloat(m.unit_cost) || 0).toLocaleString()}</td>
+                              <td className="px-4 py-2.5 font-semibold">PKR {(parseFloat(m.total_cost) || 0).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="bg-slate-50 font-medium">
+                          <tr><td colSpan={5} className="px-4 py-2.5 text-right text-slate-700">Total:</td><td className="px-4 py-2.5 text-emerald-600 font-bold">PKR {detailModal.materials.reduce((s, m) => s + (parseFloat(m.total_cost) || 0), 0).toLocaleString()}</td></tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {detailTab === 'finance' && (
+              <ProjectFinance projectId={detailModal.project.id} projectName={detailModal.project.name} />
+            )}
+
+            {detailTab === 'supply_chain' && (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <Construction size={48} className="text-slate-300 mb-4" />
+                <h3 className="text-base font-bold text-slate-700 mb-1">Supply Chain Management</h3>
+                <p className="text-sm text-slate-400">Coming Soon</p>
+              </div>
+            )}
           </div>
         )}
       </Modal>
@@ -196,7 +228,8 @@ function ProjectForm({ data, onSave, onCancel }) {
     id: data?.id || null, name: data?.name || '', client: data?.client || '',
     location: data?.location || '', city: data?.city || '',
     start_date: data?.start_date || '', end_date: data?.end_date || '',
-    status: data?.status || 'planning', description: data?.description || ''
+    status: data?.status || 'planning', description: data?.description || '',
+    project_cost_value: data?.project_cost_value || '',
   })
   const [errors, setErrors] = useState({})
 
@@ -217,6 +250,7 @@ function ProjectForm({ data, onSave, onCancel }) {
         <Select label="Status" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
           <option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On Hold</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option>
         </Select>
+        <Input label="Project Cost Value (PKR)" type="number" min="0" step="0.01" value={form.project_cost_value} onChange={e => setForm({ ...form, project_cost_value: e.target.value })} />
         <Input label="Start Date" type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
         <Input label="End Date" type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
       </div>

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   full_name VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL CHECK (role IN ('owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff')),
+  role VARCHAR(50) NOT NULL CHECK (role IN ('owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance')),
   phone VARCHAR(50),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS projects (
   city VARCHAR(100),
   budget DECIMAL(15, 2) DEFAULT 0,
   budget_used DECIMAL(15, 2) DEFAULT 0,
+  project_cost_value DECIMAL(15, 2) DEFAULT 0,
   start_date DATE,
   end_date DATE,
   status VARCHAR(50) DEFAULT 'planning' CHECK (status IN ('planning', 'active', 'on_hold', 'completed', 'cancelled')),
@@ -390,5 +391,68 @@ CREATE TABLE IF NOT EXISTS activity_feed (
   description TEXT,
   entity_type VARCHAR(100),
   entity_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- 21. FINANCE MODULE
+-- ============================================================
+
+-- 21.1 SALARIES
+CREATE TABLE IF NOT EXISTS salaries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID REFERENCES projects(id) NOT NULL,
+  employee_name VARCHAR(255) NOT NULL,
+  amount DECIMAL(15, 2) NOT NULL,
+  month DATE NOT NULL,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
+-- 21.2 PETTY CASH
+CREATE TABLE IF NOT EXISTS petty_cash (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID REFERENCES projects(id) NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  amount DECIMAL(15, 2) NOT NULL,
+  week_of DATE NOT NULL,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
+-- 21.3 VENDOR PAYMENTS
+CREATE TABLE IF NOT EXISTS vendor_payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID REFERENCES projects(id) NOT NULL,
+  vendor_id UUID REFERENCES vendors(id) NOT NULL,
+  payment_type VARCHAR(50) NOT NULL CHECK (payment_type IN ('fixed_otp', 'continuous', 'ipc')),
+  amount DECIMAL(15, 2) NOT NULL,
+  po_number VARCHAR(255),
+  bill_number VARCHAR(255),
+  ipc_percent_complete DECIMAL(5, 2),
+  payment_date DATE NOT NULL,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
+-- 21.4 DELETION REQUESTS
+CREATE TABLE IF NOT EXISTS deletion_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment')),
+  transaction_id UUID NOT NULL,
+  project_id UUID REFERENCES projects(id) NOT NULL,
+  requested_by UUID REFERENCES users(id),
+  reason TEXT,
+  admin_approval VARCHAR(20) DEFAULT 'pending' CHECK (admin_approval IN ('pending', 'approved', 'rejected')),
+  admin_approved_by UUID REFERENCES users(id),
+  admin_approved_at TIMESTAMPTZ,
+  owner_approval VARCHAR(20) DEFAULT 'pending' CHECK (owner_approval IN ('pending', 'approved', 'rejected')),
+  owner_approved_by UUID REFERENCES users(id),
+  owner_approved_at TIMESTAMPTZ,
+  final_status VARCHAR(20) DEFAULT 'pending' CHECK (final_status IN ('pending', 'approved', 'rejected')),
+  snapshot_data JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
