@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
@@ -41,6 +42,16 @@ export default function Vendors() {
   }
 
   useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
+
+  // Deep link: /vendors?po=<id> opens the PO detail modal
+  const [searchParams] = useSearchParams()
+  const poParam = searchParams.get('po')
+  useEffect(() => {
+    if (!poParam) return
+    api.get(`/purchase-orders/${poParam}`).then(({ data }) => {
+      setPoDetailModal({ open: true, po: data })
+    }).catch(err => { console.error(err); toast.error('Failed to load PO from notification') })
+  }, [poParam])
 
   const handleSave = async (form) => {
     try {

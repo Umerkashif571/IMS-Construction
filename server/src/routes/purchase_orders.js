@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit, addActivity } = require('../db/helpers');
+const { logAudit, addActivity, createNotification } = require('../db/helpers');
 
 const router = express.Router();
 
@@ -66,6 +66,13 @@ router.put('/:id/status', authenticate, authorize('owner', 'admin', 'store_manag
       `PO ${po[0].po_number} status changed to ${status}`);
     await addActivity(req.user.full_name, 'po_status', `PO ${po[0].po_number} ${status}`, 'purchase_order', req.params.id);
 
+    if (['approved', 'received', 'cancelled'].includes(status)) {
+      await createNotification(po[0].created_by, 'purchase_order',
+        `PO ${po[0].po_number} ${status}`,
+        `Purchase order ${po[0].po_number} (${po[0].vendor_name || 'vendor'}) was ${status} by ${req.user.full_name}`,
+        `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
+    }
+
     // Fetch items to return full PO object
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     res.json({ ...rows[0], items });
@@ -86,6 +93,10 @@ router.put('/:id/approve', authenticate, authorize('owner', 'admin'), async (req
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'approved', 'purchase_order', req.params.id,
       `PO ${po[0].po_number} approved`);
     await addActivity(req.user.full_name, 'approved', `PO ${po[0].po_number} approved`, 'purchase_order', req.params.id);
+    await createNotification(po[0].created_by, 'purchase_order',
+      `PO ${po[0].po_number} approved`,
+      `Purchase order ${po[0].po_number} (${po[0].vendor_name || 'vendor'}) was approved by ${req.user.full_name}`,
+      `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

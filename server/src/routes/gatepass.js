@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit, addActivity } = require('../db/helpers');
+const { logAudit, addActivity, notifyRoles } = require('../db/helpers');
 
 const router = express.Router();
 
@@ -40,6 +40,10 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager', 'man
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'gate_pass', rows[0].id,
       `Gate pass ${gpNo} issued for ${qty} ${unit || ''} of ${materialName} (vehicle: ${vehicle_number})`);
     await addActivity(req.user.full_name, 'gate_pass', `Gate pass ${gpNo} issued for ${materialName}`, 'gate_pass', rows[0].id);
+    await notifyRoles(['owner', 'admin'], 'gate_pass',
+      `Gate pass ${gpNo} issued`,
+      `${req.user.full_name} issued gate pass ${gpNo} for ${qty} ${unit || ''} of ${materialName} (vehicle: ${vehicle_number})`,
+      `/gatepass/${rows[0].id}`, 'gate_pass', rows[0].id);
     res.status(201).json(rows[0]);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

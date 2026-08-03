@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
@@ -53,6 +54,20 @@ export default function Projects() {
       setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data })
     } catch (err) { console.error(err); toast.error('Failed to load project details') }
   }
+
+  // Deep link: /projects?project=<id>&tab=finance opens the detail modal on the finance tab
+  const [searchParams] = useSearchParams()
+  const projectParam = searchParams.get('project')
+  const tabParam = searchParams.get('tab')
+  useEffect(() => {
+    if (!projectParam) return
+    const targetTab = tabParam === 'finance' ? 'finance' : 'overview'
+    setDetailTab(targetTab)
+    Promise.all([api.get(`/projects/${projectParam}`), api.get(`/projects/${projectParam}/material-cost`)])
+      .then(([projRes, matCostRes]) => setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data }))
+      .catch(err => { console.error(err); toast.error('Failed to load project from notification') })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectParam])
 
   const viewAllocations = async (project) => {
     setAllocModal({ open: true, project })

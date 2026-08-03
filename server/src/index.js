@@ -25,6 +25,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const userRoutes = require('./routes/users');
 const gatepassRoutes = require('./routes/gatepass');
 const financeRoutes = require('./routes/finance');
+const notificationRoutes = require('./routes/notifications');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -78,6 +79,7 @@ app.use('/api/backup', backupRouter);
 app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/projects/:projectId/finance', financeRoutes);
 app.use('/api/finance', financeRoutes.globalRouter);
+app.use('/api/notifications', notificationRoutes);
 
 // Scheduled daily backup at 2:00 AM
 cron.schedule('0 2 * * *', async () => {
@@ -90,6 +92,48 @@ cron.schedule('0 2 * * *', async () => {
     console.log(`Automated backup created: ${filename}`);
   } catch (err) {
     console.error('Scheduled backup failed:', err.message);
+  }
+});
+
+// Check for overdue tool checkouts hourly; notify Owner/Admin + the user who checked the tool out
+cron.schedule('0 * * * *', async () => {
+  try {
+    const { rows: overdue } = await pool.query(
+      `SELECT t.id, t.name, t.return_due_date, t.checked_out_to,
+              cl.user_id AS checkout_user_id, cl.employee_name
+       FROM tools t
+       JOIN tool_checkout_log cl ON cl.tool_id = t.id AND cl.actual_return_date IS NULL
+       WHERE t.current_status = 'checked_out'
+         AND t.is_active = true
+         AND t.return_due_date IS NOT NULL
+         AND t.return_due_date < NOW()
+         AND NOT EXISTS (
+           SELECT 1 FROM notifications n
+           WHERE n.entity_type = 'tool' AND n.entity_id = t.id AND n.type = 'tool_overdue'
+         )`
+    );
+
+    for (const tool of overdue) {
+      const title = `Tool overdue: ${tool.name}`;
+      const message = `${tool.name} was due for return on ${new Date(tool.return_due_date).toLocaleString()}`;
+      const link = `/tools?tool=${tool.id}`;
+      const recipientIds = new Set([tool.checkout_user_id]);
+      const { rows: admins } = await pool.query(
+        `SELECT id FROM users WHERE is_active = true AND role IN ('owner', 'admin')`
+      );
+      admins.forEach(a => recipientIds.add(a.id));
+      for (const uid of recipientIds) {
+        if (!uid) continue;
+        await pool.query(
+          `INSERT INTO notifications (user_id, type, title, message, link, entity_type, entity_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [uid, 'tool_overdue', title, message, link, 'tool', tool.id]
+        );
+      }
+      console.log(`Overdue notification created for tool: ${tool.name} (${tool.id})`);
+    }
+  } catch (err) {
+    console.error('Overdue tool check failed:', err.message);
   }
 });
 

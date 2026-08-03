@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, useDebouncedValue } from '../components/ui'
@@ -87,6 +88,15 @@ export default function Materials() {
     try { const { data } = await api.get(`/materials/${material.id}/transactions`); setDetailModal({ open: true, material, transactions: data }) }
     catch (err) { console.error(err); toast.error('Failed to load transactions') }
   }
+
+  // Deep link: /materials?material=<id> opens the material detail modal
+  const [searchParams] = useSearchParams()
+  const materialParam = searchParams.get('material')
+  useEffect(() => {
+    if (!materialParam) return
+    api.get(`/materials/${materialParam}`).then(({ data }) => openDetail(data)).catch(err => { console.error(err); toast.error('Failed to load material from notification') })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [materialParam])
 
   const handleStockIn = async () => {
     if (!stockInQty.quantity || parseFloat(stockInQty.quantity) <= 0) return toast.error('Enter valid quantity')

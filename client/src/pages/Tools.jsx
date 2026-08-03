@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
@@ -42,6 +43,21 @@ export default function Tools() {
   }
 
   useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
+
+  // Deep link: /tools?tool=<id> highlights and scrolls to the tool row
+  const [searchParams] = useSearchParams()
+  const toolParam = searchParams.get('tool')
+  const [highlightedTool, setHighlightedTool] = useState(null)
+  useEffect(() => {
+    if (!toolParam) return
+    setHighlightedTool(toolParam)
+    const t = setTimeout(() => {
+      const row = document.querySelector(`[data-tool-id="${toolParam}"]`)
+      if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 600)
+    const clear = setTimeout(() => setHighlightedTool(null), 4000)
+    return () => { clearTimeout(t); clearTimeout(clear) }
+  }, [toolParam, tools])
 
   const handleSave = async (form) => {
     try {
@@ -126,7 +142,7 @@ export default function Tools() {
             action={canManage ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Tool</Button> : null} />}
         >
           {tools.map(t => (
-            <tr key={t.id} className={`hover:bg-slate-50 transition-colors ${isMaintDue(t) ? 'bg-amber-50/50' : ''}`}>
+            <tr key={t.id} data-tool-id={t.id} className={`transition-colors ${isMaintDue(t) ? 'bg-amber-50/50' : 'hover:bg-slate-50'} ${highlightedTool === t.id ? 'bg-amber-100/70 ring-2 ring-amber-400' : ''}`}>
               <Td>
                 <span className="font-medium text-slate-800">{t.name}</span>
                 {isMaintDue(t) && <CircleAlert size={14} className="inline ml-1.5 text-amber-500" title="Maintenance Due" />}

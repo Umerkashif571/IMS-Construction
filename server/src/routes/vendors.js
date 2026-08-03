@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit, addActivity } = require('../db/helpers');
+const { logAudit, addActivity, notifyRoles, createNotification } = require('../db/helpers');
 
 const router = express.Router();
 
@@ -110,17 +110,25 @@ router.post('/pos', authenticate, authorize('owner', 'admin', 'procurement_offic
     }
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id, `Created PO ${poNum}: ${vendor_name}`);
     await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendor_name}`, 'purchase_order', po[0].id);
+    await notifyRoles(['owner', 'admin'], 'purchase_order',
+      `New purchase order ${poNum}`,
+      `${req.user.full_name} created PO ${poNum} for ${vendor_name}`,
+      `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
     res.status(201).json({ ...po[0], items });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.put('/pos/:id/approve', authenticate, authorize('owner', 'admin', 'procurement_officer'), async (req, res) => {
   try {
-    const { rows } = await pool.query(
+    const { rows: po } = await pool.query(
       `UPDATE purchase_orders SET status='approved', approved_by=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
       [req.user.id, req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'PO not found' });
+    await createNotification(rows[0].created_by, 'purchase_order',
+      `PO ${rows[0].po_number} approved`,
+      `Purchase order ${rows[0].po_number} (${rows[0].vendor_name || 'vendor'}) was approved by ${req.user.full_name}`,
+      `/vendors?po=${rows[0].id}`, 'purchase_order', rows[0].id);
     res.json(rows[0]);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -173,6 +181,10 @@ router.post('/:id/purchase-orders', authenticate, authorize('owner', 'admin', 'p
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id,
       `Created PO ${poNum} for ${vendor[0].name} (${total_amount})`);
     await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendor[0].name}`, 'purchase_order', po[0].id);
+    await notifyRoles(['owner', 'admin'], 'purchase_order',
+      `New purchase order ${poNum}`,
+      `${req.user.full_name} created PO ${poNum} for ${vendor[0].name}`,
+      `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
     res.status(201).json({ ...po[0], items: items_ });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

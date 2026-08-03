@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit, addActivity } = require('../db/helpers');
+const { logAudit, addActivity, notifyRoles, createNotification } = require('../db/helpers');
 
 const router = express.Router({ mergeParams: true });
 
@@ -251,6 +251,10 @@ router.post('/deletion-requests', authenticate, async (req, res) => {
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
       `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}${reason ? ` - ${reason}` : ''}`);
     await addActivity(req.user.full_name, 'requested', `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}`, 'deletion_request', rows[0].id);
+    await notifyRoles(APPROVERS, 'deletion_request',
+      `Deletion requested: ${TX_LABELS[transaction_type]}`,
+      `${req.user.full_name} requested deletion of ${TX_LABELS[transaction_type]} on ${project.name}`,
+      `/projects?project=${req.params.projectId}&tab=finance`, 'deletion_request', rows[0].id);
     res.status(201).json(rows[0]);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -350,6 +354,12 @@ async function applyApproval(req, res, level) {
     await logAudit(req.user.id, req.user.full_name, req.user.role, `${level}_approve`, 'deletion_request', id,
       `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label} (final status: ${finalStatus})`);
     await addActivity(req.user.full_name, `${level}_approve`, `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label}`, 'deletion_request', id);
+    if (finalStatus !== 'pending') {
+      await createNotification(dreq.requested_by, 'deletion_request',
+        `Deletion request ${finalStatus}`,
+        `Your deletion request for ${label} was ${finalStatus} by ${req.user.full_name}`,
+        `/projects?project=${dreq.project_id}&tab=finance`, 'deletion_request', id);
+    }
     res.json(rows[0]);
   } catch (err) {
     await client.query('ROLLBACK');

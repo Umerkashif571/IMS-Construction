@@ -23,4 +23,31 @@ async function addActivity(userName, action, description, entityType, entityId =
   }
 }
 
-module.exports = { logAudit, addActivity };
+async function createNotification(userId, type, title, message = null, link = null, entityType = null, entityId = null) {
+  try {
+    await pool.query(
+      `INSERT INTO notifications (user_id, type, title, message, link, entity_type, entity_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [userId, type, title, message, link, entityType, entityId]
+    );
+  } catch (err) {
+    console.error('Notification error:', err.message);
+  }
+}
+
+// Create a notification for every active user holding one of the given roles
+async function notifyRoles(roles, type, title, message = null, link = null, entityType = null, entityId = null) {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM users WHERE is_active = true AND role = ANY($1)`,
+      [roles]
+    );
+    for (const u of rows) {
+      await createNotification(u.id, type, title, message, link, entityType, entityId);
+    }
+  } catch (err) {
+    console.error('notifyRoles error:', err.message);
+  }
+}
+
+module.exports = { logAudit, addActivity, createNotification, notifyRoles };

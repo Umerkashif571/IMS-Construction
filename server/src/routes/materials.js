@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit, addActivity } = require('../db/helpers');
+const { logAudit, addActivity, notifyRoles } = require('../db/helpers');
 
 const router = express.Router();
 
@@ -266,6 +266,14 @@ router.post('/:id/stock-out', authenticate, authorize('owner', 'admin', 'store_m
 
       await client.query('COMMIT');
 
+      const reorderLevel = parseFloat(mat[0].reorder_level || 0);
+      if (reorderLevel > 0 && newQty <= reorderLevel) {
+        await notifyRoles(['owner', 'admin', 'store_manager'], 'low_stock',
+          `Low stock: ${mat[0].name}`,
+          `${mat[0].name} is at ${newQty} ${mat[0].unit} (reorder level: ${reorderLevel})`,
+          `/materials?material=${req.params.id}`, 'material', req.params.id);
+      }
+
       await logAudit(req.user.id, req.user.full_name, req.user.role, 'stock_out', 'material', req.params.id,
         `Stock out: ${qty} ${mat[0].unit} of ${mat[0].name} to project ${project_id}. Remaining: ${newQty}`);
       await addActivity(req.user.full_name, 'stock_out', `Removed ${qty} ${mat[0].unit} of ${mat[0].name} from stock (remaining: ${newQty})`, 'material', req.params.id);
@@ -371,6 +379,14 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
       );
 
       await client.query('COMMIT');
+
+      const reorderLevel = parseFloat(mat[0].reorder_level || 0);
+      if (movement_type === 'out' && reorderLevel > 0 && newQty <= reorderLevel) {
+        await notifyRoles(['owner', 'admin', 'store_manager'], 'low_stock',
+          `Low stock: ${mat[0].name}`,
+          `${mat[0].name} is at ${newQty} ${mat[0].unit} (reorder level: ${reorderLevel})`,
+          `/materials?material=${req.params.id}`, 'material', req.params.id);
+      }
 
       await logAudit(req.user.id, req.user.full_name, req.user.role, 'stock_movement', 'material', req.params.id,
         `Stock ${movement_type}: ${qty} ${mat[0].unit} of ${mat[0].name}`);

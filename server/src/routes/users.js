@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
-const { logAudit } = require('../db/helpers');
+const { logAudit, notifyRoles } = require('../db/helpers');
 
 const router = express.Router();
 
@@ -33,6 +33,10 @@ router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => 
       [email.trim().toLowerCase(), hash, full_name, role, phone]
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'user', rows[0].id, `Created user: ${full_name}`);
+    await notifyRoles(['owner'], 'user_created',
+      `New user created: ${full_name}`,
+      `${req.user.full_name} created a new ${role} account for ${full_name} (${rows[0].email})`,
+      `/users`, 'user', rows[0].id);
     res.status(201).json(rows[0]);
   } catch (err) { if (err.code === '23505') return res.status(400).json({ error: 'Email already exists' }); console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

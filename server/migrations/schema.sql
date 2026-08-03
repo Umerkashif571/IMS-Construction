@@ -463,6 +463,22 @@ CREATE TABLE IF NOT EXISTS deletion_requests (
 );
 
 -- ============================================================
+-- 21.5 NOTIFICATIONS (per-user, system-wide)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  message TEXT,
+  link TEXT,
+  entity_type VARCHAR(100),
+  entity_id UUID,
+  is_read BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
 -- 22. INDEXES (FK columns, status columns, timestamps)
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
@@ -503,6 +519,9 @@ CREATE INDEX IF NOT EXISTS idx_vendor_payments_project_id ON vendor_payments(pro
 CREATE INDEX IF NOT EXISTS idx_vendor_payments_vendor_id ON vendor_payments(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_deletion_requests_project_id ON deletion_requests(project_id);
 CREATE INDEX IF NOT EXISTS idx_deletion_requests_final_status ON deletion_requests(final_status);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 
 -- ============================================================
 -- 23. CONSTRAINTS (guarded — skip if existing data violates)
