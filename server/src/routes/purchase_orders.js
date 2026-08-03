@@ -72,14 +72,20 @@ router.put('/:id/status', authenticate, authorize('owner', 'admin', 'store_manag
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Approve PO (helper endpoint for frontend)
-router.put('/:id/approve', authenticate, authorize('owner', 'admin', 'procurement_officer'), async (req, res) => {
+// Approve PO (helper endpoint for frontend) — owners/admins only, matches /status rule
+router.put('/:id/approve', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
+    const { rows: po } = await pool.query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
+    if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
+    if (po[0].status !== 'pending')
+      return res.status(400).json({ error: `PO is not pending (current status: ${po[0].status})` });
     const { rows } = await pool.query(
-      `UPDATE purchase_orders SET status='approved', approved_by=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      `UPDATE purchase_orders SET status='approved', approved_by=$1, delivery_status='pending', updated_at=NOW() WHERE id=$2 RETURNING *`,
       [req.user.id, req.params.id]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'PO not found' });
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'approved', 'purchase_order', req.params.id,
+      `PO ${po[0].po_number} approved`);
+    await addActivity(req.user.full_name, 'approved', `PO ${po[0].po_number} approved`, 'purchase_order', req.params.id);
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     res.json({ ...rows[0], items });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

@@ -20,4 +20,24 @@ api.interceptors.response.use(
   }
 )
 
+// Download a file with the auth header (anchor tags bypass the axios interceptor)
+export async function downloadFile(path, fallbackFilename) {
+  const res = await api.get(path, { responseType: 'blob' })
+  const blob = res.data
+  let filename = fallbackFilename
+  const cd = res.headers['content-disposition']
+  if (cd) {
+    const m = cd.match(/filename="?([^";]+)"?/)
+    if (m) filename = m[1]
+  }
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export default api

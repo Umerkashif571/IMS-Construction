@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
+import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
 import { Plus, Search, Truck, Edit3, Trash2, Fuel, Wrench, ChevronRight, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -16,6 +16,7 @@ export default function Vehicles() {
   const [projects, setProjects] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [fuelModal, setFuelModal] = useState({ open: false, vehicle: null })
@@ -37,7 +38,7 @@ export default function Vehicles() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
 
   const handleSave = async (form) => {
     try {
@@ -91,14 +92,14 @@ export default function Vehicles() {
       <div className="flex flex-wrap gap-3">
         <div className="relative max-w-xs w-full">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input placeholder="Search vehicles..." value={search} onChange={e => { setSearch(e.target.value); load(e.target.value) }}
+          <input placeholder="Search vehicles..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
         </div>
       </div>
 
       {loading ? <LoadingSkeleton rows={6} cols={8} /> : (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+          <table className="w-full text-sm min-w-[860px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="w-10 px-2" />

@@ -9,7 +9,8 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { status, type, project } = req.query;
     let sql = `SELECT v.*, p.name as project_name
-               FROM vehicles v LEFT JOIN projects p ON v.assigned_project_id = p.id WHERE 1=1`;
+               FROM vehicles v LEFT JOIN projects p ON v.assigned_project_id = p.id
+               WHERE v.is_active = true`;
     const params = [];
     let idx = 1;
     if (status) { sql += ` AND v.current_status = $${idx}`; params.push(status); idx++; }
@@ -67,10 +68,14 @@ router.put('/:id', authenticate, authorize('owner', 'admin', 'store_manager'), a
 
 router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
-    const { rows } = await pool.query('DELETE FROM vehicles WHERE id=$1 RETURNING registration_no', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Vehicle not found' });
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'vehicle', req.params.id, `Deleted vehicle: ${rows[0].registration_no}`);
-    res.json({ message: 'Vehicle deleted' });
+    const { rows } = await pool.query(
+      'UPDATE vehicles SET is_active=false, updated_at=NOW() WHERE id=$1 AND is_active = true RETURNING registration_no',
+      [req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Vehicle not found or already deactivated' });
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'vehicle', req.params.id, `Deactivated vehicle: ${rows[0].registration_no}`);
+    await addActivity(req.user.full_name, 'deleted', `Deactivated vehicle ${rows[0].registration_no}`, 'vehicle', req.params.id);
+    res.json({ message: 'Vehicle deactivated' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

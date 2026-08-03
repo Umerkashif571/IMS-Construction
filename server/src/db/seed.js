@@ -2,6 +2,11 @@ const pool = require('./pool');
 const bcrypt = require('bcryptjs');
 
 async function seedDatabase() {
+  // Defense in depth: even if called directly, never seed automatically in production.
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_ENABLED !== 'true') {
+    console.log('SeedDatabase skipped: production mode requires SEED_ENABLED=true to seed.');
+    return;
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -12,24 +17,37 @@ async function seedDatabase() {
       console.log('Database already seeded, skipping...');
       await client.query('ROLLBACK');
       client.release();
-      client._released = true;
       return;
     }
 
     // === USERS ===
-    const hashedPassword = await bcrypt.hash('password123', 10);
-    const users = await client.query(`
-      INSERT INTO users (email, password_hash, full_name, role, phone) VALUES
-        ('admin@ims.com', $1, 'Imran Khan', 'admin', '0300-1234567'),
-        ('store@ims.com', $1, 'Ahmed Ali', 'store_manager', '0301-2345678'),
-        ('engineer@ims.com', $1, 'Usman Malik', 'site_engineer', '0302-3456789'),
-        ('procurement@ims.com', $1, 'Sana Tariq', 'procurement_officer', '0303-4567890'),
-        ('owner@ims.com', $1, 'Owner User', 'owner', '0304-5678901'),
-        ('manager@ims.com', $1, 'Manager User', 'manager', '0305-6789012'),
-        ('staff@ims.com', $1, 'Staff User', 'staff', '0306-7890123'),
-        ('finance@ims.com', $1, 'Finance User', 'finance', '0307-8901234')
-      RETURNING id, email, full_name, role
-    `, [hashedPassword]);
+    // Per-account passwords via SEED_PASSWORD_<EMAIL_PREFIX> (e.g. SEED_PASSWORD_OWNER),
+    // falling back to SEED_PASSWORD. In production these must be supplied explicitly.
+    const seedPassword = process.env.SEED_PASSWORD || 'password123';
+    if (!process.env.SEED_PASSWORD) {
+      console.warn('WARNING: SEED_PASSWORD not set — using default "password123". Change before production deployment.');
+    }
+    const accountData = [
+      ['admin@ims.com', 'Imran Khan', 'admin', '0300-1234567'],
+      ['store@ims.com', 'Ahmed Ali', 'store_manager', '0301-2345678'],
+      ['engineer@ims.com', 'Usman Malik', 'site_engineer', '0302-3456789'],
+      ['procurement@ims.com', 'Sana Tariq', 'procurement_officer', '0303-4567890'],
+      ['owner@ims.com', 'Owner User', 'owner', '0304-5678901'],
+      ['manager@ims.com', 'Manager User', 'manager', '0305-6789012'],
+      ['staff@ims.com', 'Staff User', 'staff', '0306-7890123'],
+      ['finance@ims.com', 'Finance User', 'finance', '0307-8901234']
+    ];
+    const users = [];
+    for (const [email, fullName, role, phone] of accountData) {
+      const envKey = 'SEED_PASSWORD_' + email.split('@')[0].toUpperCase();
+      const accountPassword = process.env[envKey] || seedPassword;
+      const hashedPassword = await bcrypt.hash(accountPassword, 10);
+      const { rows } = await client.query(
+        `INSERT INTO users (email, password_hash, full_name, role, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id, email, full_name, role`,
+        [email, hashedPassword, fullName, role, phone]
+      );
+      users.push(rows[0]);
+    }
     console.log('Users seeded');
 
     // === CATEGORIES ===
@@ -133,7 +151,6 @@ async function seedDatabase() {
     ];
     const materialPlaceholders = [];
     const materialValues = [];
-    const catIdxs = { cB: 'Cement & Binders', cS: 'Steel & Reinforcement', cA: 'Aggregates & Sand', cBK: 'Bricks & Blocks', cE: 'Electrical', cP: 'Plumbing', cPNT: 'Paints & Finishes', cW: 'Wood & Hardware', cC: 'Chemicals & Additives', cSF: 'Safety Equipment' };
     materialData.forEach((m, i) => {
       const paramStart = i * 11 + 1;
       materialPlaceholders.push(`($${paramStart},$${paramStart+1},$${paramStart+2},$${paramStart+3},$${paramStart+4},$${paramStart+5},$${paramStart+6},$${paramStart+7},$${paramStart+8},$${paramStart+9},$${paramStart+10})`);
@@ -194,8 +211,8 @@ async function seedDatabase() {
     console.log('Tools seeded');
 
     // === STOCK MOVEMENTS ===
-    const adminUser = users.rows[0];
-    const storeUser = users.rows[1];
+    const adminUser = users[0];
+    const storeUser = users[1];
     await client.query(`
       INSERT INTO stock_movements (material_id, material_name, movement_type, quantity, unit, reference_type, notes, warehouse_id, user_id, user_name, created_at) VALUES
         ((SELECT id FROM materials WHERE sku='CEM-OPC-001'), 'Ordinary Portland Cement (50kg)', 'in', 5000, 'bags', 'initial_stock', 'Opening stock - Main Store', $1, $2, $3, NOW() - INTERVAL '90 days'),
@@ -218,13 +235,13 @@ async function seedDatabase() {
 
     // === PURCHASE ORDERS ===
     for (const [ponum, vendorKey, vname, delStatus, poStatus, amount] of [
-      ['PO-2026-001', vendorMap['Lucky Steel Ltd'], 'Lucky Steel Ltd', 'pending', 'approved', 110250000],
+      ['PO-2026-001', vendorMap['Lucky Cement Ltd'], 'Lucky Cement Ltd', 'pending', 'approved', 110250000],
       ['PO-2026-002', vendorMap['Maple Leaf Cement'], 'Maple Leaf Cement', 'partial', 'ordered', 6200000],
-      ['PO-2026-003', null, 'Siemed Pakistan', 'pending', 'approved', 8750000]
+      ['PO-2026-003', vendorMap['Siemens Pakistan'], 'Siemens Pakistan', 'pending', 'approved', 8750000]
     ]) {
       await client.query(
         `INSERT INTO purchase_orders (po_number, vendor_id, vendor_name, order_date, expected_delivery, delivery_status, status, total_amount, created_by) VALUES ($1,$2,$3,NOW() - INTERVAL '14 days',NOW() + INTERVAL '15 days',$4,$5,$6,$7)`,
-        [ponum, vendorKey, vname, delStatus, poStatus, amount, users.rows[0].id]
+        [ponum, vendorKey, vname, delStatus, poStatus, amount, users[0].id]
       );
     }
     console.log('Purchase orders seeded');

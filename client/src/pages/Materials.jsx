@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Table, Td, Card, Button, Input, Select, LoadingSkeleton, EmptyState } from '../components/ui'
+import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, useDebouncedValue } from '../components/ui'
 import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket } from 'lucide-react'
 import { GatePassDetail } from './GatePass'
 import toast from 'react-hot-toast'
@@ -14,6 +14,7 @@ export default function Materials() {
   const [warehouses, setWarehouses] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [detailModal, setDetailModal] = useState({ open: false, material: null, transactions: [] })
@@ -67,7 +68,7 @@ export default function Materials() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
 
   const handleSave = async (form) => {
     try {
@@ -155,7 +156,7 @@ export default function Materials() {
           <input
             placeholder="Search materials..."
             value={search}
-            onChange={e => { setSearch(e.target.value); load(e.target.value) }}
+            onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
           />
         </div>

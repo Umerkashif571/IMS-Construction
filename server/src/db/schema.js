@@ -186,6 +186,7 @@ async function createSchema() {
         next_maintenance_date DATE,
         maintenance_interval_days INT DEFAULT 90,
         odometer_reading DECIMAL(10,2) DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
         notes TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -249,6 +250,7 @@ async function createSchema() {
         calibration_due_date DATE,
         warehouse_id UUID REFERENCES warehouses(id),
         storage_location VARCHAR(255),
+        is_active BOOLEAN DEFAULT true,
         notes TEXT,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -452,6 +454,16 @@ async function createSchema() {
       ALTER TABLE purchase_orders ADD CONSTRAINT purchase_orders_status_check
         CHECK (status IN ('draft', 'pending', 'pending_approval', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled'));
     `);
+    // Purchase orders default to 'pending' (no draft workflow exists in the app)
+    await client.query(`
+      DO $$
+      BEGIN
+        UPDATE purchase_orders SET status='pending' WHERE status='draft';
+      END $$;
+    `);
+    await client.query(`
+      ALTER TABLE purchase_orders ALTER COLUMN status SET DEFAULT 'pending';
+    `);
 
     // Add po_id to material_transactions for linking stock-in to PO
     await client.query(`
@@ -547,6 +559,124 @@ async function createSchema() {
       )
     `);
 
+    // ============ SCHEMA EVOLUTION (idempotent, safe on existing DBs) ============
+
+    // Backfill is_active on vehicles/tools for existing databases
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vehicles' AND column_name='is_active') THEN
+          ALTER TABLE vehicles ADD COLUMN is_active BOOLEAN DEFAULT true;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tools' AND column_name='is_active') THEN
+          ALTER TABLE tools ADD COLUMN is_active BOOLEAN DEFAULT true;
+        END IF;
+      END $$;
+    `);
+
+    // ============ INDEXES (missing FK/status/date indexes) ============
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_activity_feed_created_at ON activity_feed(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+      CREATE INDEX IF NOT EXISTS idx_warehouses_project_id ON warehouses(project_id);
+      CREATE INDEX IF NOT EXISTS idx_materials_category_id ON materials(category_id);
+      CREATE INDEX IF NOT EXISTS idx_materials_supplier_id ON materials(supplier_id);
+      CREATE INDEX IF NOT EXISTS idx_materials_warehouse_id ON materials(warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_materials_is_active ON materials(is_active);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_material_id ON stock_movements(material_id);
+      CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_vehicles_assigned_project_id ON vehicles(assigned_project_id);
+      CREATE INDEX IF NOT EXISTS idx_vehicles_current_status ON vehicles(current_status);
+      CREATE INDEX IF NOT EXISTS idx_vehicle_fuel_logs_vehicle_id ON vehicle_fuel_logs(vehicle_id);
+      CREATE INDEX IF NOT EXISTS idx_vehicle_maintenance_logs_vehicle_id ON vehicle_maintenance_logs(vehicle_id);
+      CREATE INDEX IF NOT EXISTS idx_tools_assigned_project_id ON tools(assigned_project_id);
+      CREATE INDEX IF NOT EXISTS idx_tools_warehouse_id ON tools(warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_tools_current_status ON tools(current_status);
+      CREATE INDEX IF NOT EXISTS idx_tool_checkout_log_tool_id ON tool_checkout_log(tool_id);
+      CREATE INDEX IF NOT EXISTS idx_project_allocations_project_id ON project_allocations(project_id);
+      CREATE INDEX IF NOT EXISTS idx_transfer_requests_from_wh ON transfer_requests(from_warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_transfer_requests_to_wh ON transfer_requests(to_warehouse_id);
+      CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_vendor_id ON purchase_orders(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_project_id ON purchase_orders(project_id);
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+      CREATE INDEX IF NOT EXISTS idx_po_items_po_id ON purchase_order_items(po_id);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_material_id ON material_transactions(material_id);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_id ON material_transactions(project_id);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_created_at ON material_transactions(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_gate_passes_material_id ON gate_passes(material_id);
+      CREATE INDEX IF NOT EXISTS idx_gate_passes_project_id ON gate_passes(project_id);
+      CREATE INDEX IF NOT EXISTS idx_salaries_project_id ON salaries(project_id);
+      CREATE INDEX IF NOT EXISTS idx_petty_cash_project_id ON petty_cash(project_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_payments_project_id ON vendor_payments(project_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_payments_vendor_id ON vendor_payments(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_deletion_requests_project_id ON deletion_requests(project_id);
+      CREATE INDEX IF NOT EXISTS idx_deletion_requests_final_status ON deletion_requests(final_status);
+    `);
+
+    // ============ CONSTRAINTS (guarded — skip gracefully if existing data would violate) ============
+    await client.query(`
+      DO $$
+      BEGIN
+        -- unique vendor name
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='vendors_name_key') THEN
+          BEGIN
+            ALTER TABLE vendors ADD CONSTRAINT vendors_name_key UNIQUE (name);
+          EXCEPTION WHEN unique_violation THEN
+            RAISE NOTICE 'vendors.name contains duplicates; unique constraint not added';
+          END;
+        END IF;
+
+        -- no duplicate salary for the same employee/month/project
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='salaries_project_employee_month_key') THEN
+          BEGIN
+            ALTER TABLE salaries ADD CONSTRAINT salaries_project_employee_month_key UNIQUE (project_id, employee_name, month);
+          EXCEPTION WHEN unique_violation THEN
+            RAISE NOTICE 'salaries contains duplicates; unique constraint not added';
+          END;
+        END IF;
+
+        -- positive amounts / quantities
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='salaries_amount_positive') THEN
+          BEGIN
+            ALTER TABLE salaries ADD CONSTRAINT salaries_amount_positive CHECK (amount > 0);
+          EXCEPTION WHEN check_violation THEN
+            RAISE NOTICE 'salaries.amount has non-positive values; CHECK not added';
+          END;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='petty_cash_amount_positive') THEN
+          BEGIN
+            ALTER TABLE petty_cash ADD CONSTRAINT petty_cash_amount_positive CHECK (amount > 0);
+          EXCEPTION WHEN check_violation THEN
+            RAISE NOTICE 'petty_cash.amount has non-positive values; CHECK not added';
+          END;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='vendor_payments_amount_positive') THEN
+          BEGIN
+            ALTER TABLE vendor_payments ADD CONSTRAINT vendor_payments_amount_positive CHECK (amount > 0);
+          EXCEPTION WHEN check_violation THEN
+            RAISE NOTICE 'vendor_payments.amount has non-positive values; CHECK not added';
+          END;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='vendor_payments_ipc_range') THEN
+          BEGIN
+            ALTER TABLE vendor_payments ADD CONSTRAINT vendor_payments_ipc_range CHECK (ipc_percent_complete IS NULL OR (ipc_percent_complete >= 0 AND ipc_percent_complete <= 100));
+          EXCEPTION WHEN check_violation THEN
+            RAISE NOTICE 'vendor_payments.ipc_percent_complete out of range; CHECK not added';
+          END;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='projects_end_after_start') THEN
+          BEGIN
+            ALTER TABLE projects ADD CONSTRAINT projects_end_after_start CHECK (end_date IS NULL OR start_date IS NULL OR end_date >= start_date);
+          EXCEPTION WHEN check_violation THEN
+            RAISE NOTICE 'projects has end_date before start_date; CHECK not added';
+          END;
+        END IF;
+      END $$;
+    `);
+
     await client.query('COMMIT');
     console.log('Schema created successfully');
   } catch (err) {
@@ -555,7 +685,6 @@ async function createSchema() {
     throw err;
   } finally {
     client.release();
-    client._released = true;
   }
 }
 

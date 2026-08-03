@@ -46,15 +46,15 @@ router.get('/summary', authenticate, async (req, res) => {
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const salaryQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM salaries WHERE project_id=$1 AND status='active'`,
+      `SELECT COALESCE(SUM(amount), 0)::float as total FROM salaries WHERE project_id=$1 AND status<>'deleted'`,
       [req.params.projectId]
     );
     const pettyQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM petty_cash WHERE project_id=$1 AND status='active'`,
+      `SELECT COALESCE(SUM(amount), 0)::float as total FROM petty_cash WHERE project_id=$1 AND status<>'deleted'`,
       [req.params.projectId]
     );
     const vendorQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM vendor_payments WHERE project_id=$1 AND status='active'`,
+      `SELECT COALESCE(SUM(amount), 0)::float as total FROM vendor_payments WHERE project_id=$1 AND status<>'deleted'`,
       [req.params.projectId]
     );
 
@@ -239,7 +239,14 @@ router.post('/deletion-requests', authenticate, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [transaction_type, transaction_id, req.params.projectId, req.user.id, reason || null, JSON.stringify(tx[0])]
     );
-    await pool.query(`UPDATE ${table} SET status='deletion_requested' WHERE id=$1`, [transaction_id]);
+    const { rowCount } = await pool.query(
+      `UPDATE ${table} SET status='deletion_requested' WHERE id=$1 AND status='active'`,
+      [transaction_id]
+    );
+    if (rowCount === 0) {
+      await pool.query('DELETE FROM deletion_requests WHERE id=$1', [rows[0].id]);
+      return res.status(400).json({ error: 'Transaction is no longer active' });
+    }
 
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
       `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}${reason ? ` - ${reason}` : ''}`);
@@ -350,7 +357,6 @@ async function applyApproval(req, res, level) {
     res.status(500).json({ error: 'Server error' });
   } finally {
     client.release();
-    client._released = true;
   }
 }
 
@@ -364,4 +370,28 @@ router.patch('/deletion-requests/:id/owner-approve', authenticate, authorize('ow
   return applyApproval(req, res, 'owner');
 });
 
+// ============ GLOBAL ROUTES (mounted separately at /api/finance) ============
+
+// GET /api/finance/deletion-requests — open (not finalized) deletion requests across all projects, for the notification bell
+const globalRouter = express.Router();
+
+globalRouter.get('/deletion-requests', authenticate, authorize('owner', 'admin'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT dr.id, dr.transaction_type, dr.transaction_id, dr.project_id, dr.reason,
+              dr.admin_approval, dr.admin_approved_by, dr.admin_approved_at,
+              dr.owner_approval, dr.owner_approved_by, dr.owner_approved_at,
+              dr.final_status, dr.snapshot_data, dr.created_at,
+              ru.full_name as requested_by_name, p.name as project_name
+       FROM deletion_requests dr
+       LEFT JOIN users ru ON dr.requested_by = ru.id
+       LEFT JOIN projects p ON dr.project_id = p.id
+       WHERE dr.final_status = 'pending'
+       ORDER BY dr.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;
+module.exports.globalRouter = globalRouter;

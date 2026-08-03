@@ -254,7 +254,7 @@ function GatePassDetail({ gp, onPrint, onPdf, embedded }) {
             </div>
           ))}
         </div>
-        <div className="mt-8 flex justify-between pt-6 border-t border-slate-100">
+        <div className="mt-8 flex flex-wrap justify-between gap-4 pt-6 border-t border-slate-100">
           <div className="text-center">
             <div className="border-t border-slate-400 pt-1 mt-10 w-36 text-[10px] text-slate-500">Issued By Signature</div>
           </div>
@@ -270,4 +270,4 @@ function GatePassDetail({ gp, onPrint, onPdf, embedded }) {
   )
 }
 
-export { GatePassDetail, GatePass as GatePassPage }
+export { GatePassDetail }

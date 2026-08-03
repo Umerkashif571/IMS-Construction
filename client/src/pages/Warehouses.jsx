@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
+import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
 import { Plus, Search, Edit3, Trash2, ArrowRightLeft, Building2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -17,6 +17,7 @@ export default function Warehouses() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [detailModal, setDetailModal] = useState({ open: false, warehouse: null, transactions: [] })
@@ -43,7 +44,7 @@ export default function Warehouses() {
     }).catch(err => { console.error(err); toast.error('Failed to load warehouses') }).finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
 
   const handleSave = async (form) => {
     try {
@@ -139,7 +140,7 @@ export default function Warehouses() {
       </div>
       <div className="flex flex-wrap gap-3">
         <div className="max-w-xs">
-          <Input placeholder="Search warehouses..." value={search} onChange={e => { setSearch(e.target.value); load(e.target.value) }} />
+          <Input placeholder="Search warehouses..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
       {loading ? (

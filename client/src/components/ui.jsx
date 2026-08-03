@@ -1,4 +1,14 @@
+import { useState, useEffect } from 'react'
 import { X, AlertTriangle } from 'lucide-react'
+
+export function useDebouncedValue(value, delay = 400) {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return debounced
+}
 
 export function Table({ headers, children, empty, loading }) {
   if (loading) return <LoadingSkeleton rows={5} cols={headers.length} />
@@ -146,11 +156,12 @@ export function Button({ children, variant = 'primary', size = 'md', className =
   )
 }
 
-export function Input({ label, error, className = '', ...props }) {
+export function Input({ label, error, id, className = '', ...props }) {
+  const inputId = id || (label ? label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : undefined)
   return (
     <div className="space-y-1.5">
-      {label && <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">{label}</label>}
-      <input className={`w-full px-3.5 py-2.5 text-sm border rounded-lg bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 ${
+      {label && <label htmlFor={inputId} className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">{label}</label>}
+      <input id={inputId} className={`w-full px-3.5 py-2.5 text-sm border rounded-lg bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 ${
         error ? 'border-red-300 bg-red-50' : 'border-slate-300 hover:border-slate-400'
       } ${className}`} {...props} />
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
@@ -158,11 +169,12 @@ export function Input({ label, error, className = '', ...props }) {
   )
 }
 
-export function Select({ label, error, children, className = '', ...props }) {
+export function Select({ label, error, id, children, className = '', ...props }) {
+  const inputId = id || (label ? label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : undefined)
   return (
     <div className="space-y-1.5">
-      {label && <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">{label}</label>}
-      <select className={`w-full px-3.5 py-2.5 text-sm border rounded-lg bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 ${
+      {label && <label htmlFor={inputId} className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">{label}</label>}
+      <select id={inputId} className={`w-full px-3.5 py-2.5 text-sm border rounded-lg bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 ${
         error ? 'border-red-300 bg-red-50' : 'border-slate-300 hover:border-slate-400'
       } ${className}`} {...props}>{children}</select>
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}

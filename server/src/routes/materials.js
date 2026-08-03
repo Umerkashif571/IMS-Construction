@@ -60,13 +60,17 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), asy
     description = sanitize(description);
     if (!sku || !name || !unit) return res.status(400).json({ error: 'SKU, name, and unit required' });
     if (!isValidPositiveNumber(quantity)) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
+    if (reorder_level !== undefined && (isNaN(parseFloat(reorder_level)) || parseFloat(reorder_level) < 0))
+      return res.status(400).json({ error: 'Reorder level must be a non-negative number' });
+    if (unit_cost !== undefined && (isNaN(parseFloat(unit_cost)) || parseFloat(unit_cost) < 0))
+      return res.status(400).json({ error: 'Unit cost must be a non-negative number' });
     if (!category_id) category_id = null;
     if (!supplier_id) supplier_id = null;
     if (!warehouse_id) warehouse_id = null;
     const { rows } = await pool.query(
       `INSERT INTO materials (sku, name, description, category_id, unit, quantity, reorder_level, unit_cost, supplier_id, storage_location, warehouse_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [sku, name, description, category_id, unit, parseFloat(quantity) || 0, reorder_level || 0, unit_cost || 0, supplier_id, storage_location, warehouse_id]
+      [sku, name, description, category_id, unit, parseFloat(quantity) || 0, parseFloat(reorder_level) || 0, parseFloat(unit_cost) || 0, supplier_id, storage_location, warehouse_id]
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'material', rows[0].id, `Created material: ${name}`);
     await addActivity(req.user.full_name, 'created', `Added ${name} to inventory`, 'material', rows[0].id);
@@ -85,6 +89,10 @@ router.put('/:id', authenticate, authorize('owner', 'admin', 'store_manager'), a
     description = sanitize(description);
     if (!name) return res.status(400).json({ error: 'Name is required' });
     if (quantity !== undefined && !isValidPositiveNumber(quantity)) return res.status(400).json({ error: 'Quantity must be a non-negative number' });
+    if (reorder_level !== undefined && (isNaN(parseFloat(reorder_level)) || parseFloat(reorder_level) < 0))
+      return res.status(400).json({ error: 'Reorder level must be a non-negative number' });
+    if (unit_cost !== undefined && (isNaN(parseFloat(unit_cost)) || parseFloat(unit_cost) < 0))
+      return res.status(400).json({ error: 'Unit cost must be a non-negative number' });
     if (!category_id) category_id = null;
     if (!supplier_id) supplier_id = null;
     if (!warehouse_id) warehouse_id = null;
@@ -185,7 +193,6 @@ router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_ma
       throw err;
     } finally {
       client.release();
-      client._released = true;
     }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -270,7 +277,6 @@ router.post('/:id/stock-out', authenticate, authorize('owner', 'admin', 'store_m
       throw err;
     } finally {
       client.release();
-      client._released = true;
     }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -297,6 +303,9 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
   try {
     const { movement_type, quantity, notes, warehouse_id, project_id, location, driver_name, vehicle_number } = req.body;
     if (!movement_type || !quantity) return res.status(400).json({ error: 'Movement type and quantity required' });
+    if (!['in', 'out'].includes(movement_type)) return res.status(400).json({ error: 'Movement type must be "in" or "out"' });
+    if (isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0)
+      return res.status(400).json({ error: 'Quantity must be a positive number' });
 
     if (movement_type === 'out') {
       const errors = [];
@@ -373,7 +382,6 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
       throw err;
     } finally {
       client.release();
-      client._released = true;
     }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

@@ -10,7 +10,12 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const stored = localStorage.getItem('ims_user')
     if (stored) {
-      setUser(JSON.parse(stored))
+      try {
+        setUser(JSON.parse(stored))
+      } catch {
+        localStorage.removeItem('ims_user')
+        localStorage.removeItem('ims_token')
+      }
     }
     setLoading(false)
   }, [])

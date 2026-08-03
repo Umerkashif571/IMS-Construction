@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import api from '../api'
+import api, { downloadFile } from '../api'
 import { ConfirmDialog, Button, LoadingSkeleton, EmptyState } from '../components/ui'
 import { Download, Upload, ShieldOff, HardDrive, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -37,6 +37,14 @@ export default function Backup() {
       console.error(err); toast.error('Backup failed: ' + (err.response?.data?.error || err.message))
     } finally {
       setBackingUp(false)
+    }
+  }
+
+  const handleDownload = async (name) => {
+    try {
+      await downloadFile('/backup/export', name)
+    } catch (err) {
+      console.error(err); toast.error('Download failed')
     }
   }
 
@@ -93,7 +101,7 @@ export default function Backup() {
                     <td className="px-4 py-3 text-sm text-slate-500">-</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => window.open(`/api/backup/export`, '_blank')}>
+                        <Button variant="secondary" size="sm" onClick={() => handleDownload(b.name)}>
                           <Download size={14} /> Download
                         </Button>
                         <Button variant="destructive" size="sm" onClick={() => setRestoreConfirm({ open: true, name: b.name })}>

@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import NotificationBell from './NotificationBell'
 import logo from '../assets/logo.jpg'
 import footerImg from '../assets/banner-text.jpg'
 import {
   LayoutDashboard, Package, Truck, Wrench, Building2, Store, Warehouse,
-  BarChart3, Users, Shield, Ticket, LogOut, Menu, Bell, ChevronLeft,
-  Search, X
+  BarChart3, Users, Shield, Ticket, LogOut, Menu, ChevronLeft,
 } from 'lucide-react'
 
 const navItems = [
@@ -139,10 +139,7 @@ export default function Layout() {
           <div className="flex-1" />
 
           {/* Notification bell */}
-          <button className="relative p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
-            <Bell size={18} />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-          </button>
+          <NotificationBell />
 
           <div className="h-6 w-px bg-slate-200" />
 

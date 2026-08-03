@@ -19,12 +19,18 @@ router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => 
   try {
     const { email, password, full_name, role, phone } = req.body;
     if (!email || !password || !full_name || !role) return res.status(400).json({ error: 'All fields required' });
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      return res.status(400).json({ error: 'Invalid email format' });
+    if (typeof password !== 'string' || password.length < 8)
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const VALID_ROLES = ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'];
+    if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'owner' && req.user.role !== 'owner')
       return res.status(403).json({ error: 'Only owners can create owner accounts' });
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
       `INSERT INTO users (email, password_hash, full_name, role, phone) VALUES ($1,$2,$3,$4,$5) RETURNING id, email, full_name, role, phone`,
-      [email, hash, full_name, role, phone]
+      [email.trim().toLowerCase(), hash, full_name, role, phone]
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'user', rows[0].id, `Created user: ${full_name}`);
     res.status(201).json(rows[0]);

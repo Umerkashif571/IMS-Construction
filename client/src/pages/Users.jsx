@@ -188,7 +188,7 @@ function UserForm({ data, onSave, onCancel }) {
       <Input label="Email *" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
       <Input label={form.id ? 'New Password (leave blank to keep)' : 'Password *'} type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
       <Input label="Full Name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} />
-      <Select label="Role" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="owner">Owner</option><option value="admin">Admin</option><option value="manager">Manager</option><option value="finance">Finance</option><option value="staff">Staff</option><option value="store_manager">Store Manager</option><option value="site_engineer">Site Engineer</option><option value="procurement_officer">Procurement Officer</option></Select>
+      <Select label="Role" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{user?.role === 'owner' && <option value="owner">Owner</option>}<option value="admin">Admin</option><option value="manager">Manager</option><option value="finance">Finance</option><option value="staff">Staff</option><option value="store_manager">Store Manager</option><option value="site_engineer">Site Engineer</option><option value="procurement_officer">Procurement Officer</option></Select>
       <Input label="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
       <div className="flex gap-3 pt-2">
         <Button type="submit">{form.id ? 'Update' : 'Create'}</Button>

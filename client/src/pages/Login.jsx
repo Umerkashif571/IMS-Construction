@@ -84,7 +84,7 @@ export default function Login() {
                   <div key={d.email} className={`p-2 rounded-lg ${d.badge}`}>
                     <div className="font-medium">{d.role}</div>
                     <div className="opacity-75">{d.email}</div>
-                    <div className="opacity-60">password123</div>
+                    <div className="opacity-60">Password set by administrator</div>
                   </div>
                 ))}
               </div>

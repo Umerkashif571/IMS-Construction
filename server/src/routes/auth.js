@@ -8,17 +8,50 @@ require('dotenv').config();
 
 const router = express.Router();
 
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+const MAX_ATTEMPTS = 8;
+const LOCK_MS = 15 * 60 * 1000;
+const attempts = new Map();
 
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = true', [email]);
-    if (rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
+function throttleKey(email, ip) {
+  return `${(email || '').toLowerCase().trim()}|${ip}`;
+}
+
+function isLocked(email, ip) {
+  const rec = attempts.get(throttleKey(email, ip));
+  if (!rec) return false;
+  if (rec.lockedUntil && Date.now() < rec.lockedUntil) return true;
+  if (Date.now() - rec.firstAt > LOCK_MS) { attempts.delete(throttleKey(email, ip)); return false; }
+  return false;
+}
+
+function recordFailure(email, ip) {
+  const key = throttleKey(email, ip);
+  const rec = attempts.get(key) || { count: 0, firstAt: Date.now() };
+  rec.count += 1;
+  if (rec.count >= MAX_ATTEMPTS) rec.lockedUntil = Date.now() + LOCK_MS;
+  attempts.set(key, rec);
+}
+
+function recordSuccess(email, ip) { attempts.delete(throttleKey(email, ip)); }
+
+router.post('/login', async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  if (isLocked(email, ip)) return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = true', [email.trim().toLowerCase()]);
+    if (rows.length === 0) { recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' }); }
 
     const user = rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!valid) { recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' }); }
+
+    recordSuccess(email, ip);
 
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role, full_name: user.full_name },

@@ -1,5 +1,4 @@
 const express = require('express');
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const pool = require('../db/pool');
@@ -10,6 +9,14 @@ const router = express.Router();
 const BACKUP_DIR = path.join(__dirname, '..', '..', 'backups');
 
 if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+
+function safeBackupName(filename) {
+  if (typeof filename !== 'string') return null;
+  const base = path.basename(filename);
+  if (base !== filename) return null;
+  if (!/^ims_backup_\d{4}-\d{2}-\d{2}_\d+\.sql$/.test(base)) return null;
+  return base;
+}
 
 router.get('/export', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
@@ -23,7 +30,7 @@ router.get('/export', authenticate, authorize('owner', 'admin'), async (req, res
     });
   } catch (err) {
     console.error('Backup export error:', err);
-    res.status(500).json({ error: 'Backup failed: ' + err.message });
+    res.status(500).json({ error: 'Backup failed' });
   }
 });
 
@@ -42,8 +49,8 @@ router.get('/list', authenticate, authorize('owner', 'admin'), async (req, res) 
 
 router.post('/restore', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
-    const { filename } = req.body;
-    if (!filename) return res.status(400).json({ error: 'Filename required' });
+    const filename = safeBackupName(req.body.filename);
+    if (!filename) return res.status(400).json({ error: 'Invalid backup filename' });
     const filepath = path.join(BACKUP_DIR, filename);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Backup file not found' });
     const sql = fs.readFileSync(filepath, 'utf8');
@@ -52,32 +59,16 @@ router.post('/restore', authenticate, authorize('owner', 'admin'), async (req, r
     res.json({ message: 'Database restored successfully' });
   } catch (err) {
     console.error('Restore error:', err);
-    res.status(500).json({ error: 'Restore failed: ' + err.message });
+    res.status(500).json({ error: 'Restore failed' });
   }
 });
-
-async function spawnDatabase() {
-  return new Promise((resolve, reject) => {
-    const dump = [];
-    const pgDump = spawn('pg_dump', [
-      '-h', 'localhost', '-p', '5432', '-U', 'postgres',
-      '-d', 'ims_db', '--clean', '--if-exists'
-    ], { env: { ...process.env, PGPASSWORD: 'postgres' } });
-    pgDump.stdout.on('data', (data) => dump.push(data));
-    pgDump.stderr.on('data', (data) => console.error('pg_dump stderr:', data.toString()));
-    pgDump.on('close', (code) => {
-      if (code === 0) resolve(dump.join(''));
-      else reject(new Error(`pg_dump exited with code ${code}`));
-    });
-    pgDump.on('error', (err) => reject(err));
-  });
-}
 
 async function dumpWithoutPgDump() {
   const tables = ['users', 'categories', 'vendors', 'projects', 'warehouses', 'materials',
     'stock_movements', 'vehicles', 'vehicle_fuel_logs', 'vehicle_maintenance_logs',
     'tools', 'tool_checkout_log', 'project_allocations', 'transfer_requests',
-    'purchase_orders', 'purchase_order_items', 'audit_logs', 'activity_feed'
+    'purchase_orders', 'purchase_order_items', 'material_transactions', 'gate_passes',
+    'audit_logs', 'activity_feed', 'salaries', 'petty_cash', 'vendor_payments', 'deletion_requests'
   ];
   let sql = '-- IMS Database Backup\n-- Generated: ' + new Date().toISOString() + '\n\n';
   for (const table of tables) {
@@ -89,7 +80,9 @@ async function dumpWithoutPgDump() {
         const vals = cols.map(c => {
           const v = row[c];
           if (v === null || v === undefined) return 'NULL';
-          if (v instanceof Date || typeof v === 'string') return `'${String(v).replace(/'/g, "''")}'`;
+          if (v instanceof Date || typeof v === 'string') {
+            return `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
+          }
           return v;
         });
         sql += `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});\n`;
@@ -100,4 +93,4 @@ async function dumpWithoutPgDump() {
   return sql;
 }
 
-module.exports = { router, spawnDatabase, dumpWithoutPgDump, BACKUP_DIR };
+module.exports = { router, dumpWithoutPgDump, BACKUP_DIR };

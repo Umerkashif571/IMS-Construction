@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge } from '../components/ui'
-import { Plus, Search, FileText, PlusCircle, Edit3, Trash2, X, Building2, Printer, ChevronRight, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
+import { Plus, Search, FileText, PlusCircle, Edit3, Trash2, X, Building2, Printer, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const statusBadge = (s) => {
@@ -19,6 +19,7 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [poModal, setPoModal] = useState({ open: false, vendor: null })
@@ -39,7 +40,7 @@ export default function Vendors() {
     api.get(`/vendors${params}`).then(({ data }) => setVendors(data)).catch(err => { console.error(err); toast.error('Failed to load vendors') }).finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
 
   const handleSave = async (form) => {
     try {
@@ -145,7 +146,7 @@ export default function Vendors() {
       </div>
       <div className="flex flex-wrap gap-3">
         <div className="max-w-xs">
-          <Input placeholder="Search vendors..." value={search} onChange={e => { setSearch(e.target.value); load(e.target.value) }} />
+          <Input placeholder="Search vendors..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
       {loading ? (

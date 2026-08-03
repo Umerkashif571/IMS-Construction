@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useAuth } from '../context/AuthContext'
-import api from '../api'
+import api, { downloadFile } from '../api'
 import { Button, LoadingSkeleton, EmptyState } from '../components/ui'
 import { BarChart3, Building2, Truck, Wrench, Settings, Package, Printer, FileSpreadsheet, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -14,7 +13,7 @@ const reportTypes = [
   { key: 'vendor-purchases', label: 'Vendor Purchases', icon: Package, color: 'border-teal-200 bg-teal-50' },
 ]
 
-const exportUrl = (key, fmt) => `/api/reports/${key}?format=${fmt === 'xlsx' ? 'excel' : fmt}`
+const exportPath = (key, fmt) => `/reports/${key}?format=${fmt === 'xlsx' ? 'excel' : fmt}`
 
 const tableConfig = {
   'stock-valuation': { cols: ['SKU', 'Name', 'Category', 'Qty', 'Unit', 'Unit Cost', 'Total Value'], keys: ['sku', 'name', 'category_name', 'quantity', 'unit', 'unit_cost', 'total_value'] },
@@ -52,6 +51,16 @@ export default function Reports() {
   }, [])
 
   const handlePrint = () => window.print()
+
+  const handleExport = async (fmt) => {
+    try {
+      const filename = `${activeReport}-report.${fmt === 'xlsx' ? 'xlsx' : 'pdf'}`
+      await downloadFile(exportPath(activeReport, fmt), filename)
+      toast.success(`${fmt.toUpperCase()} exported`)
+    } catch (err) {
+      console.error(err); toast.error('Export failed')
+    }
+  }
 
   const loadReport = async (key) => {
     setActiveReport(key)
@@ -102,12 +111,8 @@ export default function Reports() {
             <h3 className="font-semibold text-gray-800">{reportTypes.find(r => r.key === activeReport)?.label}</h3>
             <div className="flex gap-2 no-print">
               <Button variant="secondary" size="sm" onClick={handlePrint}><Printer size={14} /> Print</Button>
-              <a href={exportUrl(activeReport, 'xlsx')} target="_blank" rel="noopener noreferrer">
-                <Button variant="secondary" size="sm"><FileSpreadsheet size={14} /> Excel</Button>
-              </a>
-              <a href={exportUrl(activeReport, 'pdf')} target="_blank" rel="noopener noreferrer">
-                <Button variant="secondary" size="sm"><FileText size={14} /> PDF</Button>
-              </a>
+              <Button variant="secondary" size="sm" onClick={() => handleExport('xlsx')}><FileSpreadsheet size={14} /> Excel</Button>
+              <Button variant="secondary" size="sm" onClick={() => handleExport('pdf')}><FileText size={14} /> PDF</Button>
             </div>
           </div>
           {loadingReport ? (

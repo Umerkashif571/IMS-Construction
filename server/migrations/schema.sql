@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
   next_maintenance_date DATE,
   maintenance_interval_days INT DEFAULT 90,
   odometer_reading DECIMAL(10,2) DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -233,6 +234,7 @@ CREATE TABLE IF NOT EXISTS tools (
   calibration_due_date DATE,
   warehouse_id UUID REFERENCES warehouses(id),
   storage_location VARCHAR(255),
+  is_active BOOLEAN DEFAULT true,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -254,6 +256,7 @@ CREATE TABLE IF NOT EXISTS tool_checkout_log (
   condition_on_return VARCHAR(50),
   notes TEXT,
   user_id UUID REFERENCES users(id),
+  returned_by VARCHAR(255),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -312,11 +315,12 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   order_date TIMESTAMPTZ DEFAULT NOW(),
   expected_delivery DATE,
   delivery_status VARCHAR(50) DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'partial', 'delivered', 'cancelled')),
-  status VARCHAR(50) DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'approved', 'rejected', 'ordered', 'completed')),
+  status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'ordered', 'received', 'partial_received', 'cancelled', 'completed', 'delivered', 'returned')),
   total_amount DECIMAL(15,2) DEFAULT 0,
   notes TEXT,
   created_by UUID REFERENCES users(id),
   approved_by UUID REFERENCES users(id),
+  received_by VARCHAR(255),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -357,6 +361,7 @@ CREATE TABLE IF NOT EXISTS material_transactions (
   source VARCHAR(255),
   received_by VARCHAR(255),
   transaction_type VARCHAR(100),
+  po_id UUID REFERENCES purchase_orders(id),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -456,3 +461,66 @@ CREATE TABLE IF NOT EXISTS deletion_requests (
   snapshot_data JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================================
+-- 22. INDEXES (FK columns, status columns, timestamps)
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_feed_created_at ON activity_feed(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_warehouses_project_id ON warehouses(project_id);
+CREATE INDEX IF NOT EXISTS idx_materials_category_id ON materials(category_id);
+CREATE INDEX IF NOT EXISTS idx_materials_supplier_id ON materials(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_materials_warehouse_id ON materials(warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_materials_is_active ON materials(is_active);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_material_id ON stock_movements(material_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vehicles_assigned_project_id ON vehicles(assigned_project_id);
+CREATE INDEX IF NOT EXISTS idx_vehicles_current_status ON vehicles(current_status);
+CREATE INDEX IF NOT EXISTS idx_vehicle_fuel_logs_vehicle_id ON vehicle_fuel_logs(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_maintenance_logs_vehicle_id ON vehicle_maintenance_logs(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_tools_assigned_project_id ON tools(assigned_project_id);
+CREATE INDEX IF NOT EXISTS idx_tools_warehouse_id ON tools(warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_tools_current_status ON tools(current_status);
+CREATE INDEX IF NOT EXISTS idx_tool_checkout_log_tool_id ON tool_checkout_log(tool_id);
+CREATE INDEX IF NOT EXISTS idx_project_allocations_project_id ON project_allocations(project_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_from_wh ON transfer_requests(from_warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_to_wh ON transfer_requests(to_warehouse_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_vendor_id ON purchase_orders(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_project_id ON purchase_orders(project_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+CREATE INDEX IF NOT EXISTS idx_po_items_po_id ON purchase_order_items(po_id);
+CREATE INDEX IF NOT EXISTS idx_material_transactions_material_id ON material_transactions(material_id);
+CREATE INDEX IF NOT EXISTS idx_material_transactions_project_id ON material_transactions(project_id);
+CREATE INDEX IF NOT EXISTS idx_material_transactions_created_at ON material_transactions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gate_passes_material_id ON gate_passes(material_id);
+CREATE INDEX IF NOT EXISTS idx_gate_passes_project_id ON gate_passes(project_id);
+CREATE INDEX IF NOT EXISTS idx_salaries_project_id ON salaries(project_id);
+CREATE INDEX IF NOT EXISTS idx_petty_cash_project_id ON petty_cash(project_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_payments_project_id ON vendor_payments(project_id);
+CREATE INDEX IF NOT EXISTS idx_vendor_payments_vendor_id ON vendor_payments(vendor_id);
+CREATE INDEX IF NOT EXISTS idx_deletion_requests_project_id ON deletion_requests(project_id);
+CREATE INDEX IF NOT EXISTS idx_deletion_requests_final_status ON deletion_requests(final_status);
+
+-- ============================================================
+-- 23. CONSTRAINTS (guarded — skip if existing data violates)
+-- ============================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='vendors_name_key') THEN
+    BEGIN
+      ALTER TABLE vendors ADD CONSTRAINT vendors_name_key UNIQUE (name);
+    EXCEPTION WHEN unique_violation THEN
+      RAISE NOTICE 'vendors.name contains duplicates; unique constraint not added';
+    END;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='salaries_project_employee_month_key') THEN
+    BEGIN
+      ALTER TABLE salaries ADD CONSTRAINT salaries_project_employee_month_key UNIQUE (project_id, employee_name, month);
+    EXCEPTION WHEN unique_violation THEN
+      RAISE NOTICE 'salaries contains duplicates; unique constraint not added';
+    END;
+  END IF;
+END $$;

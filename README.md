@@ -75,14 +75,26 @@ npm run dev
 
 ### 4. Login
 
-The system is pre-seeded with sample data. Use any of these credentials:
+The system is pre-seeded with sample data when a database is first created (dev environments only).
+Each demo account has a unique password supplied via environment variables
+(`SEED_PASSWORD_ADMIN`, `SEED_PASSWORD_STORE`, `SEED_PASSWORD_ENGINEER`, `SEED_PASSWORD_PROCUREMENT`,
+`SEED_PASSWORD_OWNER`, `SEED_PASSWORD_MANAGER`, `SEED_PASSWORD_STAFF`, `SEED_PASSWORD_FINANCE`),
+falling back to `SEED_PASSWORD`. Demo account passwords are not committed to this repository;
+ask your administrator for the current credentials.
 
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@ims.com | password123 |
-| Store Manager | store@ims.com | password123 |
-| Site Engineer | engineer@ims.com | password123 |
-| Procurement Officer | procurement@ims.com | password123 |
+| Role | Email |
+|------|-------|
+| Admin | admin@ims.com |
+| Store Manager | store@ims.com |
+| Site Engineer | engineer@ims.com |
+| Procurement Officer | procurement@ims.com |
+| Owner | owner@ims.com |
+| Manager | manager@ims.com |
+| Staff | staff@ims.com |
+| Finance | finance@ims.com |
+
+> Seeding is disabled automatically in production (`NODE_ENV=production`). It only runs when
+> `SEED_ENABLED=true` is explicitly set.
 
 ## Backup & Restore
 

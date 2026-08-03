@@ -10,7 +10,8 @@ router.get('/', authenticate, async (req, res) => {
     const { status, condition, type, project } = req.query;
     let sql = `SELECT t.*, p.name as project_name, w.name as warehouse_name
                FROM tools t LEFT JOIN projects p ON t.assigned_project_id = p.id
-               LEFT JOIN warehouses w ON t.warehouse_id = w.id WHERE 1=1`;
+               LEFT JOIN warehouses w ON t.warehouse_id = w.id
+               WHERE t.is_active = true`;
     const params = [];
     let idx = 1;
     if (status) { sql += ` AND t.current_status = $${idx}`; params.push(status); idx++; }
@@ -67,11 +68,15 @@ router.put('/:id', authenticate, authorize('owner', 'admin', 'store_manager'), a
 
 router.delete('/:id', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
-    const { rows } = await pool.query('DELETE FROM tools WHERE id=$1 RETURNING name', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Tool not found' });
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'tool', req.params.id, `Deleted tool: ${rows[0].name}`);
-    res.json({ message: 'Tool deleted' });
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+    const { rows } = await pool.query(
+      'UPDATE tools SET is_active=false, updated_at=NOW() WHERE id=$1 AND is_active = true RETURNING name',
+      [req.params.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Tool not found or already deactivated' });
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'deleted', 'tool', req.params.id, `Deactivated tool: ${rows[0].name}`);
+    await addActivity(req.user.full_name, 'deleted', `Deactivated tool ${rows[0].name}`, 'tool', req.params.id);
+    res.json({ message: 'Tool deactivated' });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Checkout / Checkin
@@ -80,8 +85,10 @@ router.post('/:id/checkout', authenticate, authorize('owner', 'admin', 'store_ma
     let { checked_out_to, employee_name, assigned_project_id, expected_return_date, notes } = req.body;
     if (!checked_out_to) return res.status(400).json({ error: 'Checked out to required' });
     if (!assigned_project_id) assigned_project_id = null;
-    const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1', [req.params.id]);
+    const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1 AND is_active = true', [req.params.id]);
     if (tool.length === 0) return res.status(404).json({ error: 'Tool not found' });
+    if (tool[0].current_status !== 'available')
+      return res.status(409).json({ error: `Tool is not available (current status: ${tool[0].current_status})` });
     await pool.query(
       `UPDATE tools SET current_status='checked_out', checked_out_to=$1, checked_out_employee=$2, assigned_project_id=$3, return_due_date=$4 WHERE id=$5`,
       [checked_out_to, employee_name, assigned_project_id, expected_return_date, req.params.id]
@@ -91,6 +98,8 @@ router.post('/:id/checkout', authenticate, authorize('owner', 'admin', 'store_ma
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [req.params.id, tool[0].name, checked_out_to, employee_name, assigned_project_id, expected_return_date, notes, req.user.id]
     );
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'check_out', 'tool', req.params.id,
+      `Checked out ${tool[0].name} to ${checked_out_to}${assigned_project_id ? ' (project: ' + assigned_project_id + ')' : ''}`);
     await addActivity(req.user.full_name, 'checked_out', `Checked out ${tool[0].name} to ${checked_out_to}`, 'tool', req.params.id);
     res.json({ message: 'Tool checked out' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
@@ -102,8 +111,10 @@ router.post('/:id/checkin', authenticate, authorize('owner', 'admin', 'store_man
     if (!returned_by) return res.status(400).json({ error: 'Returned by is required' });
 
     // Get current tool data before update
-    const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1', [req.params.id]);
+    const { rows: tool } = await pool.query('SELECT * FROM tools WHERE id=$1 AND is_active = true', [req.params.id]);
     if (tool.length === 0) return res.status(404).json({ error: 'Tool not found' });
+    if (tool[0].current_status !== 'checked_out')
+      return res.status(409).json({ error: `Tool is not currently checked out (status: ${tool[0].current_status})` });
 
     const checkedOutTo = tool[0].checked_out_to;
 
