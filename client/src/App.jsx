@@ -15,6 +15,7 @@ const Reports = lazy(() => import('./pages/Reports'))
 const Users = lazy(() => import('./pages/Users'))
 const Backup = lazy(() => import('./pages/Backup'))
 const GatePass = lazy(() => import('./pages/GatePass'))
+const BankBook = lazy(() => import('./pages/BankBook'))
 
 function PageFallback() {
   return (
@@ -54,13 +55,14 @@ export default function App() {
         <Route path="vehicles" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Lazy><Vehicles /></Lazy></RoleRoute>} />
         <Route path="tools" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Lazy><Tools /></Lazy></RoleRoute>} />
         <Route path="projects" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance']}><Lazy><Projects /></Lazy></RoleRoute>} />
-        <Route path="vendors" element={<RoleRoute roles={['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff']}><Lazy><Vendors /></Lazy></RoleRoute>} />
+        <Route path="vendors" element={<RoleRoute roles={['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance']}><Lazy><Vendors /></Lazy></RoleRoute>} />
         <Route path="warehouses" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><Warehouses /></Lazy></RoleRoute>} />
         <Route path="reports" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff']}><Lazy><Reports /></Lazy></RoleRoute>} />
         <Route path="users" element={<RoleRoute roles={['owner', 'admin']}><Lazy><Users /></Lazy></RoleRoute>} />
         <Route path="backup" element={<RoleRoute roles={['owner', 'admin']}><Lazy><Backup /></Lazy></RoleRoute>} />
         <Route path="gatepass" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><GatePass /></Lazy></RoleRoute>} />
         <Route path="gatepass/:id" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><GatePass /></Lazy></RoleRoute>} />
+        <Route path="bankbook" element={<RoleRoute roles={['owner', 'admin', 'finance']}><Lazy><BankBook /></Lazy></RoleRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -9,7 +9,7 @@ const router = express.Router();
 router.get('/', authenticate, async (req, res) => {
   try {
     const { status, vendor_id, search } = req.query;
-    let sql = `SELECT po.*, v.name as vendor_name, v.contact_person as vendor_contact, v.phone as vendor_phone, v.email as vendor_email, v.city as vendor_city, v.address as vendor_address FROM purchase_orders po LEFT JOIN vendors v ON po.vendor_id=v.id WHERE 1=1`;
+    let sql = `SELECT po.*, v.name as vendor_name, v.contact_person as vendor_contact, v.phone as vendor_phone, v.email as vendor_email, v.city as vendor_city, v.address as vendor_address, p.name as project_name FROM purchase_orders po LEFT JOIN vendors v ON po.vendor_id=v.id LEFT JOIN projects p ON po.project_id=p.id WHERE 1=1`;
     const params = []; let idx = 1;
     if (status) { sql += ` AND po.status = $${idx}`; params.push(status); idx++; }
     if (vendor_id) { sql += ` AND po.vendor_id = $${idx}`; params.push(vendor_id); idx++; }

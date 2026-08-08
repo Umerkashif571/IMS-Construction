@@ -515,6 +515,7 @@ async function createSchema() {
         vendor_id UUID REFERENCES vendors(id) NOT NULL,
         payment_type VARCHAR(50) NOT NULL CHECK (payment_type IN ('fixed_otp', 'continuous', 'ipc')),
         amount DECIMAL(15, 2) NOT NULL,
+        po_id UUID REFERENCES purchase_orders(id),
         po_number VARCHAR(255),
         bill_number VARCHAR(255),
         ipc_percent_complete DECIMAL(5, 2),
@@ -525,11 +526,51 @@ async function createSchema() {
       )
     `);
 
+    // Banks (company-wide, independent of projects)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS banks (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name VARCHAR(255) NOT NULL,
+        account_number VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Bank transactions (immutable ledger entries)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS bank_transactions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        bank_id UUID REFERENCES banks(id) ON DELETE CASCADE NOT NULL,
+        date DATE NOT NULL,
+        payee_name VARCHAR(255) NOT NULL,
+        cheque_no VARCHAR(255),
+        amount_in DECIMAL(15, 2) DEFAULT 0,
+        amount_out DECIMAL(15, 2) DEFAULT 0,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
+    `);
+
+    // Amount Received (client payments per project)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS amount_received (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        project_id UUID REFERENCES projects(id) NOT NULL,
+        amount DECIMAL(15, 2) NOT NULL,
+        received_date DATE NOT NULL,
+        description VARCHAR(255),
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
+    `);
+
     // Deletion Requests (approval workflow for finance transactions)
     await client.query(`
       CREATE TABLE IF NOT EXISTS deletion_requests (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment')),
+        transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received')),
         transaction_id UUID NOT NULL,
         project_id UUID REFERENCES projects(id) NOT NULL,
         requested_by UUID REFERENCES users(id),
@@ -590,6 +631,34 @@ async function createSchema() {
       END $$;
     `);
 
+    // ============ FINANCE V2 EVOLUTION ============
+    await client.query(`
+      DO $$
+      DECLARE
+        con record;
+      BEGIN
+        -- vendor_payments: optional PO linkage (continuous payments)
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendor_payments' AND column_name='po_id') THEN
+          ALTER TABLE vendor_payments ADD COLUMN po_id UUID REFERENCES purchase_orders(id);
+        END IF;
+
+        -- deletion_requests: allow bank-transaction requests (project-independent)
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='deletion_requests' AND column_name='project_id' AND is_nullable='NO') THEN
+          ALTER TABLE deletion_requests ALTER COLUMN project_id DROP NOT NULL;
+        END IF;
+
+        -- extend allowed transaction types for deletion requests
+        FOR con IN
+          SELECT conname FROM pg_constraint
+          WHERE conrelid = 'deletion_requests'::regclass AND contype = 'c' AND conname LIKE '%transaction_type%'
+        LOOP
+          EXECUTE format('ALTER TABLE deletion_requests DROP CONSTRAINT %I', con.conname);
+        END LOOP;
+        ALTER TABLE deletion_requests ADD CONSTRAINT deletion_requests_transaction_type_check
+          CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received'));
+      END $$;
+    `);
+
     // ============ INDEXES (missing FK/status/date indexes) ============
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
@@ -633,6 +702,13 @@ async function createSchema() {
       CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
       CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
       CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_banks_created_at ON banks(created_at);
+      CREATE INDEX IF NOT EXISTS idx_bank_transactions_bank_id ON bank_transactions(bank_id);
+      CREATE INDEX IF NOT EXISTS idx_bank_transactions_date ON bank_transactions(date);
+      CREATE INDEX IF NOT EXISTS idx_bank_transactions_status ON bank_transactions(status);
+      CREATE INDEX IF NOT EXISTS idx_amount_received_project_id ON amount_received(project_id);
+      CREATE INDEX IF NOT EXISTS idx_amount_received_status ON amount_received(status);
+      CREATE INDEX IF NOT EXISTS idx_vendor_payments_po_id ON vendor_payments(po_id);
     `);
 
     // ============ CONSTRAINTS (guarded — skip gracefully if existing data would violate) ============

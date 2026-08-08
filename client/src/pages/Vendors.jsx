@@ -24,6 +24,9 @@ export default function Vendors() {
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [poModal, setPoModal] = useState({ open: false, vendor: null })
+  const [overviewTab, setOverviewTab] = useState('pos')
+  const [overview, setOverview] = useState(null)
+  const [payTypeFilter, setPayTypeFilter] = useState('')
   const [pos, setPos] = useState([])
   const [poSearch, setPoSearch] = useState('')
   const [poStatusFilter, setPoStatusFilter] = useState('')
@@ -34,6 +37,7 @@ export default function Vendors() {
 
   const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
   const canApprove = ['owner', 'admin'].includes(user?.role)
+  const canSeePayments = ['owner', 'admin', 'finance'].includes(user?.role)
 
   const load = (q = '') => {
     setLoading(true)
@@ -67,10 +71,19 @@ export default function Vendors() {
 
   const viewPOs = async (vendor) => {
     setPoModal({ open: true, vendor })
+    setOverviewTab('pos')
+    setOverview(null)
+    setPayTypeFilter('')
     try {
       const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendor.id } })
       setPos(data || [])
     } catch (err) { console.error(err); toast.error('Failed to load purchase orders'); setPos([]) }
+    if (canSeePayments) {
+      try {
+        const { data } = await api.get('/finance/vendor-overview', { params: { vendor_id: vendor.id } })
+        setOverview(data)
+      } catch (err) { console.error(err); toast.error('Failed to load vendor overview') }
+    }
   }
 
   const openPoDetail = async (po) => {
@@ -214,32 +227,51 @@ export default function Vendors() {
 
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this vendor?" />
 
-      {/* Purchase Orders Modal */}
-      <Modal isOpen={poModal.open} onClose={() => { setPoModal({ open: false, vendor: null }); setPos([]); setPoSearch(''); setPoStatusFilter('') }} title={`Purchase Orders: ${poModal.vendor?.name}`} size="max-w-3xl">
+      {/* Purchase Orders / Overview Modal */}
+      <Modal isOpen={poModal.open} onClose={() => { setPoModal({ open: false, vendor: null }); setPos([]); setPoSearch(''); setPoStatusFilter(''); setOverviewTab('pos'); setOverview(null); setPayTypeFilter('') }} title={overviewTab === 'payments' ? `Payments: ${poModal.vendor?.name}` : `Purchase Orders: ${poModal.vendor?.name}`} size="max-w-3xl">
         <div className="space-y-4">
-          <div className="flex gap-3">
-            <div className="flex-1"><Input placeholder="Search POs..." value={poSearch} onChange={e => setPoSearch(e.target.value)} /></div>
-            <div className="w-40"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
-          </div>
-          {filteredPos.length === 0 ? (
-            <EmptyState icon={FileText} title="No purchase orders" text="No POs found for this vendor" />
-          ) : (
-            <div className="space-y-2">
-              {filteredPos.map(po => (
-                <div key={po.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => openPoDetail(po)}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">#{po.po_number}</span>
-                      <span className="text-xs text-gray-400">{po.created_at ? new Date(po.created_at).toLocaleDateString() : '-'}</span>
-                      {statusBadge(po.status)}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">PKR {(parseFloat(po.total_amount) || 0).toLocaleString()}</span>
-                      <ChevronRight size={16} className="text-gray-400" />
-                    </div>
-                  </div>
-                </div>
+          {canSeePayments && (
+            <div className="flex gap-1 border-b border-gray-200">
+              {['pos', 'payments'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setOverviewTab(tab)}
+                  className={`px-3 py-2 text-xs font-semibold transition-colors ${overviewTab === tab ? 'text-slate-800 border-b-2 border-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {tab === 'pos' ? 'Purchase Orders' : 'Payments & Totals'}
+                </button>
               ))}
+            </div>
+          )}
+          {overviewTab === 'payments' ? (
+            <OverviewPayments overview={overview} payTypeFilter={payTypeFilter} setPayTypeFilter={setPayTypeFilter} formatPKR={formatPKR} statusBadge={statusBadge} />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex gap-3">
+                <div className="flex-1"><Input placeholder="Search POs..." value={poSearch} onChange={e => setPoSearch(e.target.value)} /></div>
+                <div className="w-40"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
+              </div>
+              {filteredPos.length === 0 ? (
+                <EmptyState icon={FileText} title="No purchase orders" text="No POs found for this vendor" />
+              ) : (
+                <div className="space-y-2">
+                  {filteredPos.map(po => (
+                    <div key={po.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => openPoDetail(po)}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium">#{po.po_number}</span>
+                          <span className="text-xs text-gray-400">{po.created_at ? new Date(po.created_at).toLocaleDateString() : '-'}</span>
+                          {statusBadge(po.status)}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">PKR {(parseFloat(po.total_amount) || 0).toLocaleString()}</span>
+                          <ChevronRight size={16} className="text-gray-400" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -344,6 +376,80 @@ export default function Vendors() {
           </div>
         )}
       </Modal>
+    </div>
+  )
+}
+
+const formatPKR = (v) => {
+  const n = Math.round(parseFloat(v) || 0)
+  const sign = n < 0 ? '-' : ''
+  const s = String(Math.abs(n))
+  const last3 = s.slice(-3)
+  const rest = s.slice(0, -3)
+  return `Rs. ${sign}${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`
+}
+
+function OverviewPayments({ overview, payTypeFilter, setPayTypeFilter, formatPKR, statusBadge }) {
+  const payments = (overview?.payments || []).filter(p => !payTypeFilter || p.payment_type === payTypeFilter)
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Total PO Value</div>
+          <div className="text-lg font-bold">{formatPKR(overview?.total_po_value)}</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Total Paid</div>
+          <div className="text-lg font-bold text-emerald-600">{formatPKR(overview?.total_paid)}</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">Outstanding Balance</div>
+          <div className={`text-lg font-bold ${(overview?.balance || 0) < 0 ? 'text-red-600' : 'text-slate-800'}`}>{formatPKR(overview?.balance)}</div>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="w-44">
+          <Select value={payTypeFilter} onChange={e => setPayTypeFilter(e.target.value)}>
+            <option value="">All Payment Types</option>
+            <option value="fixed_otp">Fixed (OTP)</option>
+            <option value="continuous">Continuous</option>
+            <option value="ipc">IPC</option>
+          </Select>
+        </div>
+        <span className="text-xs text-slate-400">{payments.length} payment{payments.length === 1 ? '' : 's'}</span>
+      </div>
+      {payments.length === 0 ? (
+        <EmptyState icon={FileText} title="No payments" text="No vendor payments match this view" />
+      ) : (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Date</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Type</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Project</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">PO</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Amount</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {payments.map(p => (
+                  <tr key={p.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 text-gray-500">{p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-'}</td>
+                    <td className="px-4 py-2.5">{p.payment_type?.replace(/_/g, ' ')}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{p.project_name || '-'}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{p.po_number || '-'}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
+                    <td className="px-4 py-2.5">{statusBadge(p.status)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

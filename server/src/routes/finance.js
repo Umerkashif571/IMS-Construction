@@ -13,12 +13,16 @@ const TX_TABLES = {
   salary: 'salaries',
   petty_cash: 'petty_cash',
   vendor_payment: 'vendor_payments',
+  bank_transaction: 'bank_transactions',
+  amount_received: 'amount_received',
 };
 
 const TX_LABELS = {
   salary: 'Salary',
   petty_cash: 'Petty Cash',
   vendor_payment: 'Vendor Payment',
+  bank_transaction: 'Bank Transaction',
+  amount_received: 'Amount Received',
 };
 
 const VALID_TX_TYPES = Object.keys(TX_TABLES);
@@ -57,21 +61,31 @@ router.get('/summary', authenticate, async (req, res) => {
       `SELECT COALESCE(SUM(amount), 0)::float as total FROM vendor_payments WHERE project_id=$1 AND status<>'deleted'`,
       [req.params.projectId]
     );
+    const receivedQ = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0)::float as total FROM amount_received WHERE project_id=$1 AND status<>'deleted'`,
+      [req.params.projectId]
+    );
 
     const salariesTotal = parseFloat(salaryQ.rows[0].total) || 0;
     const pettyCashTotal = parseFloat(pettyQ.rows[0].total) || 0;
     const vendorPaymentsTotal = parseFloat(vendorQ.rows[0].total) || 0;
+    const amountReceivedTotal = parseFloat(receivedQ.rows[0].total) || 0;
 
     const vendorIncluded = isFull;
     const actualCost = salariesTotal + pettyCashTotal + (vendorIncluded ? vendorPaymentsTotal : 0);
     const projectCostValue = parseFloat(project.project_cost_value) || 0;
     const balance = projectCostValue - actualCost;
+    const balanceReceived = amountReceivedTotal - actualCost;
+    const profitLoss = projectCostValue - actualCost;
     const percentUtilized = projectCostValue > 0 ? (actualCost / projectCostValue) * 100 : 0;
 
     const payload = {
       project_cost_value: projectCostValue,
       actual_cost: actualCost,
       balance,
+      balance_received: balanceReceived,
+      profit_loss: profitLoss,
+      amount_received_total: amountReceivedTotal,
       percent_utilized: Math.round(percentUtilized * 100) / 100,
       salaries_total: salariesTotal,
       petty_cash_total: pettyCashTotal,
@@ -163,9 +177,10 @@ router.get('/vendor-payments', authenticate, async (req, res) => {
     if (!FULL_ACCESS.includes(req.user.role))
       return res.status(403).json({ error: 'Vendor payment data is restricted' });
     const { rows } = await pool.query(
-      `SELECT vp.*, v.name as vendor_name, u.full_name as created_by_name
+      `SELECT vp.*, v.name as vendor_name, p.name as project_name, u.full_name as created_by_name
        FROM vendor_payments vp
        LEFT JOIN vendors v ON vp.vendor_id = v.id
+       LEFT JOIN projects p ON vp.project_id = p.id
        LEFT JOIN users u ON vp.created_by = u.id
        WHERE vp.project_id=$1 ORDER BY vp.payment_date DESC, vp.created_at DESC`,
       [req.params.projectId]
@@ -176,7 +191,7 @@ router.get('/vendor-payments', authenticate, async (req, res) => {
 
 router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { vendor_id, payment_type, amount, po_number, bill_number, ipc_percent_complete, payment_date } = req.body;
+    const { vendor_id, payment_type, amount, po_id, bill_number, ipc_percent_complete, payment_date } = req.body;
     if (!vendor_id) return res.status(400).json({ error: 'Vendor required' });
     if (!payment_type || !['fixed_otp', 'continuous', 'ipc'].includes(payment_type))
       return res.status(400).json({ error: 'Valid payment type required' });
@@ -195,15 +210,71 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
       ipcPct = pct;
     }
 
+    // PO linkage: 'continuous' payments must reference a PO from the purchase_orders table.
+    // 'fixed_otp'/'ipc' payments are never linked to a PO — any PO fields are normalized away.
+    let poId = null;
+    let poNumber = null;
+    let billNo = null;
+    if (payment_type === 'continuous') {
+      if (!po_id) return res.status(400).json({ error: 'PO selection required for continuous payments' });
+      const poQ = await pool.query(
+        'SELECT id, po_number, total_amount, status FROM purchase_orders WHERE id=$1 AND vendor_id=$2',
+        [po_id, vendor_id]
+      );
+      if (poQ.rows.length === 0) return res.status(400).json({ error: 'Selected PO not found for this vendor' });
+      const poStatus = poQ.rows[0].status;
+      if (poStatus === 'cancelled') return res.status(400).json({ error: 'Cannot link payment to a cancelled PO' });
+      poId = po_id;
+      poNumber = poQ.rows[0].po_number;
+      billNo = bill_number || null;
+    }
+
     const { rows } = await pool.query(
-      `INSERT INTO vendor_payments (project_id, vendor_id, payment_type, amount, po_number, bill_number, ipc_percent_complete, payment_date, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [req.params.projectId, vendor_id, payment_type, amt, po_number || null, bill_number || null, ipcPct, payment_date, req.user.id]
+      `INSERT INTO vendor_payments (project_id, vendor_id, payment_type, amount, po_id, po_number, bill_number, ipc_percent_complete, payment_date, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [req.params.projectId, vendor_id, payment_type, amt, poId, poNumber, billNo, ipcPct, payment_date, req.user.id]
     );
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'vendor_payment', rows[0].id,
       `Created vendor payment: ${vendorQ.rows[0].name} - PKR ${amt} on ${project.name}`);
     await addActivity(req.user.full_name, 'created', `Added vendor payment for ${vendorQ.rows[0].name} on project: ${project.name}`, 'vendor_payment', rows[0].id);
     res.status(201).json({ ...rows[0], vendor_name: vendorQ.rows[0].name });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ============ AMOUNT RECEIVED ============
+
+router.get('/amount-received', authenticate, async (req, res) => {
+  try {
+    if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    const { rows } = await pool.query(
+      `SELECT ar.*, u.full_name as created_by_name
+       FROM amount_received ar LEFT JOIN users u ON ar.created_by = u.id
+       WHERE ar.project_id=$1 ORDER BY ar.received_date DESC, ar.created_at DESC`,
+      [req.params.projectId]
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+router.post('/amount-received', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
+  try {
+    const { amount, received_date, description } = req.body;
+    if (!received_date) return res.status(400).json({ error: 'Received date required' });
+    const amt = parseAmount(amount);
+    if (amt === null) return res.status(400).json({ error: 'Valid amount required' });
+    const project = await projectExists(res, req.params.projectId);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const { rows } = await pool.query(
+      `INSERT INTO amount_received (project_id, amount, received_date, description, created_by)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [req.params.projectId, amt, received_date, description || null, req.user.id]
+    );
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'amount_received', rows[0].id,
+      `Created amount received record: PKR ${amt} on ${project.name}`);
+    await addActivity(req.user.full_name, 'created', `Recorded payment received: PKR ${amt} on project: ${project.name}`, 'amount_received', rows[0].id);
+    res.status(201).json(rows[0]);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -300,7 +371,7 @@ async function finalizeDeletionRequest(client, deletionRequest) {
   return finalStatus;
 }
 
-async function applyApproval(req, res, level) {
+async function applyApproval(req, res, level, projectId = undefined) {
   const { id } = req.params;
   const { approve } = req.body;
   if (typeof approve !== 'boolean') return res.status(400).json({ error: 'approve must be true or false' });
@@ -309,10 +380,15 @@ async function applyApproval(req, res, level) {
   try {
     await client.query('BEGIN');
 
-    const { rows: reqRows } = await client.query(
-      'SELECT * FROM deletion_requests WHERE id=$1 AND project_id=$2 FOR UPDATE',
-      [id, req.params.projectId]
-    );
+    const { rows: reqRows } = projectId
+      ? await client.query(
+          'SELECT * FROM deletion_requests WHERE id=$1 AND project_id=$2 FOR UPDATE',
+          [id, projectId]
+        )
+      : await client.query(
+          'SELECT * FROM deletion_requests WHERE id=$1 FOR UPDATE',
+          [id]
+        );
     if (reqRows.length === 0) return res.status(404).json({ error: 'Deletion request not found' });
     const dreq = reqRows[0];
 
@@ -355,10 +431,13 @@ async function applyApproval(req, res, level) {
       `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label} (final status: ${finalStatus})`);
     await addActivity(req.user.full_name, `${level}_approve`, `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label}`, 'deletion_request', id);
     if (finalStatus !== 'pending') {
+      const link = dreq.project_id
+        ? `/projects?project=${dreq.project_id}&tab=finance`
+        : '/bankbook';
       await createNotification(dreq.requested_by, 'deletion_request',
         `Deletion request ${finalStatus}`,
         `Your deletion request for ${label} was ${finalStatus} by ${req.user.full_name}`,
-        `/projects?project=${dreq.project_id}&tab=finance`, 'deletion_request', id);
+        link, 'deletion_request', id);
     }
     res.json(rows[0]);
   } catch (err) {
@@ -372,12 +451,12 @@ async function applyApproval(req, res, level) {
 
 // PATCH /deletion-requests/:id/admin-approve — Admin, Owner only (first-level approval)
 router.patch('/deletion-requests/:id/admin-approve', authenticate, authorize('owner', 'admin'), (req, res) => {
-  return applyApproval(req, res, 'admin');
+  return applyApproval(req, res, 'admin', req.params.projectId);
 });
 
 // PATCH /deletion-requests/:id/owner-approve — Owner only (final approval)
 router.patch('/deletion-requests/:id/owner-approve', authenticate, authorize('owner'), (req, res) => {
-  return applyApproval(req, res, 'owner');
+  return applyApproval(req, res, 'owner', req.params.projectId);
 });
 
 // ============ GLOBAL ROUTES (mounted separately at /api/finance) ============
@@ -400,6 +479,102 @@ globalRouter.get('/deletion-requests', authenticate, authorize('owner', 'admin')
        ORDER BY dr.created_at DESC`
     );
     res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// POST /api/finance/deletion-requests — global-level deletion request (bank transactions only)
+globalRouter.post('/deletion-requests', authenticate, async (req, res) => {
+  try {
+    const { transaction_type, transaction_id, reason } = req.body;
+    if (transaction_type !== 'bank_transaction')
+      return res.status(400).json({ error: 'Only bank transactions can be requested at global scope' });
+    if (!transaction_id) return res.status(400).json({ error: 'Transaction id required' });
+    if (!FULL_ACCESS.includes(req.user.role))
+      return res.status(403).json({ error: 'You cannot request deletion of this transaction type' });
+
+    const { rows: tx } = await pool.query(
+      'SELECT * FROM bank_transactions WHERE id=$1',
+      [transaction_id]
+    );
+    if (tx.length === 0) return res.status(404).json({ error: 'Transaction not found' });
+    if (tx[0].status !== 'active')
+      return res.status(400).json({ error: 'Only active transactions can be requested for deletion' });
+
+    const { rows } = await pool.query(
+      `INSERT INTO deletion_requests (transaction_type, transaction_id, project_id, requested_by, reason, snapshot_data)
+       VALUES ($1,$2,NULL,$3,$4,$5) RETURNING *`,
+      [transaction_type, transaction_id, req.user.id, reason || null, JSON.stringify(tx[0])]
+    );
+    const { rowCount } = await pool.query(
+      `UPDATE bank_transactions SET status='deletion_requested' WHERE id=$1 AND status='active'`,
+      [transaction_id]
+    );
+    if (rowCount === 0) {
+      await pool.query('DELETE FROM deletion_requests WHERE id=$1', [rows[0].id]);
+      return res.status(400).json({ error: 'Transaction is no longer active' });
+    }
+
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
+      `Deletion requested for Bank Transaction${reason ? ` - ${reason}` : ''}`);
+    await addActivity(req.user.full_name, 'requested', `Deletion requested for a Bank Transaction`, 'deletion_request', rows[0].id);
+    await notifyRoles(APPROVERS, 'deletion_request',
+      `Deletion requested: Bank Transaction`,
+      `${req.user.full_name} requested deletion of a bank transaction`,
+      '/bankbook', 'deletion_request', rows[0].id);
+    res.status(201).json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// PATCH /api/finance/deletion-requests/:id/admin-approve — global (projectless) approval
+globalRouter.patch('/deletion-requests/:id/admin-approve', authenticate, authorize('owner', 'admin'), (req, res) => {
+  return applyApproval(req, res, 'admin');
+});
+
+// PATCH /api/finance/deletion-requests/:id/owner-approve — Owner only
+globalRouter.patch('/deletion-requests/:id/owner-approve', authenticate, authorize('owner'), (req, res) => {
+  return applyApproval(req, res, 'owner');
+});
+
+// GET /api/finance/vendor-overview?vendor_id=... — POs + payments + running totals (Owner/Admin/Finance)
+globalRouter.get('/vendor-overview', authenticate, async (req, res) => {
+  try {
+    if (!FULL_ACCESS.includes(req.user.role))
+      return res.status(403).json({ error: 'Vendor payment data is restricted' });
+    const { vendor_id } = req.query;
+    if (!vendor_id) return res.status(400).json({ error: 'vendor_id query parameter required' });
+
+    const vendorQ = await pool.query('SELECT * FROM vendors WHERE id=$1', [vendor_id]);
+    if (vendorQ.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
+
+    const pos = await pool.query(
+      `SELECT po.*, p.name as project_name
+       FROM purchase_orders po LEFT JOIN projects p ON po.project_id = p.id
+       WHERE po.vendor_id=$1 ORDER BY po.created_at DESC`,
+      [vendor_id]
+    );
+    const payments = await pool.query(
+      `SELECT vp.*, v.name as vendor_name, p.name as project_name, u.full_name as created_by_name
+       FROM vendor_payments vp
+       LEFT JOIN vendors v ON vp.vendor_id = v.id
+       LEFT JOIN projects p ON vp.project_id = p.id
+       LEFT JOIN users u ON vp.created_by = u.id
+       WHERE vp.vendor_id=$1 ORDER BY vp.payment_date DESC, vp.created_at DESC`,
+      [vendor_id]
+    );
+
+    const activePos = pos.rows.filter((po) => po.status !== 'cancelled');
+    const activePayments = payments.rows.filter((vp) => vp.status !== 'deleted');
+    const totalPoValue = activePos.reduce((sum, po) => sum + (parseFloat(po.total_amount) || 0), 0);
+    const totalPaid = activePayments.reduce((sum, vp) => sum + (parseFloat(vp.amount) || 0), 0);
+
+    res.json({
+      vendor: vendorQ.rows[0],
+      purchase_orders: pos.rows,
+      payments: payments.rows,
+      total_po_value: totalPoValue,
+      total_paid: totalPaid,
+      balance: totalPoValue - totalPaid,
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

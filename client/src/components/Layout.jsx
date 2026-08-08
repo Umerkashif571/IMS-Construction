@@ -6,7 +6,7 @@ import logo from '../assets/logo.jpg'
 import footerImg from '../assets/banner-text.jpg'
 import {
   LayoutDashboard, Package, Truck, Wrench, Building2, Store, Warehouse,
-  BarChart3, Users, Shield, Ticket, LogOut, Menu, ChevronLeft,
+  BarChart3, Users, Shield, Ticket, LogOut, Menu, ChevronLeft, Landmark,
 } from 'lucide-react'
 
 const navItems = [
@@ -15,10 +15,11 @@ const navItems = [
   { to: '/vehicles', label: 'Vehicles', icon: Truck, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff'] },
   { to: '/tools', label: 'Tools & Equipment', icon: Wrench, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff'] },
   { to: '/projects', label: 'Projects', icon: Building2, roles: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'] },
-  { to: '/vendors', label: 'Vendors', icon: Store, roles: ['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff'] },
+  { to: '/vendors', label: 'Vendors', icon: Store, roles: ['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance'] },
   { to: '/warehouses', label: 'Warehouses', icon: Warehouse, roles: ['owner', 'admin', 'store_manager', 'manager', 'staff'] },
   { to: '/reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff'] },
   { to: '/gatepass', label: 'Gate Passes', icon: Ticket, roles: ['owner', 'admin', 'store_manager', 'manager', 'staff'] },
+  { to: '/bankbook', label: 'Bank Book', icon: Landmark, roles: ['owner', 'admin', 'finance'] },
   { to: '/users', label: 'Users', icon: Users, roles: ['owner', 'admin'] },
   { to: '/backup', label: 'Backup', icon: Shield, roles: ['owner', 'admin'] },
 ]

@@ -434,6 +434,7 @@ CREATE TABLE IF NOT EXISTS vendor_payments (
   vendor_id UUID REFERENCES vendors(id) NOT NULL,
   payment_type VARCHAR(50) NOT NULL CHECK (payment_type IN ('fixed_otp', 'continuous', 'ipc')),
   amount DECIMAL(15, 2) NOT NULL,
+  po_id UUID REFERENCES purchase_orders(id),
   po_number VARCHAR(255),
   bill_number VARCHAR(255),
   ipc_percent_complete DECIMAL(5, 2),
@@ -443,12 +444,46 @@ CREATE TABLE IF NOT EXISTS vendor_payments (
   status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
 );
 
+-- 21.3.1 BANKS
+CREATE TABLE IF NOT EXISTS banks (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(255) NOT NULL,
+  account_number VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 21.3.2 BANK TRANSACTIONS
+CREATE TABLE IF NOT EXISTS bank_transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  bank_id UUID REFERENCES banks(id) ON DELETE CASCADE NOT NULL,
+  date DATE NOT NULL,
+  payee_name VARCHAR(255) NOT NULL,
+  cheque_no VARCHAR(255),
+  amount_in DECIMAL(15, 2) DEFAULT 0,
+  amount_out DECIMAL(15, 2) DEFAULT 0,
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
+-- 21.3.3 AMOUNT RECEIVED
+CREATE TABLE IF NOT EXISTS amount_received (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id UUID REFERENCES projects(id) NOT NULL,
+  amount DECIMAL(15, 2) NOT NULL,
+  received_date DATE NOT NULL,
+  description VARCHAR(255),
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
 -- 21.4 DELETION REQUESTS
 CREATE TABLE IF NOT EXISTS deletion_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment')),
+  transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received')),
   transaction_id UUID NOT NULL,
-  project_id UUID REFERENCES projects(id) NOT NULL,
+  project_id UUID REFERENCES projects(id),
   requested_by UUID REFERENCES users(id),
   reason TEXT,
   admin_approval VARCHAR(20) DEFAULT 'pending' CHECK (admin_approval IN ('pending', 'approved', 'rejected')),
@@ -522,6 +557,13 @@ CREATE INDEX IF NOT EXISTS idx_deletion_requests_final_status ON deletion_reques
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_vendor_payments_po_id ON vendor_payments(po_id);
+CREATE INDEX IF NOT EXISTS idx_banks_created_at ON banks(created_at);
+CREATE INDEX IF NOT EXISTS idx_bank_transactions_bank_id ON bank_transactions(bank_id);
+CREATE INDEX IF NOT EXISTS idx_bank_transactions_date ON bank_transactions(date);
+CREATE INDEX IF NOT EXISTS idx_bank_transactions_status ON bank_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_amount_received_project_id ON amount_received(project_id);
+CREATE INDEX IF NOT EXISTS idx_amount_received_status ON amount_received(status);
 
 -- ============================================================
 -- 23. CONSTRAINTS (guarded — skip if existing data violates)

@@ -25,6 +25,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const userRoutes = require('./routes/users');
 const gatepassRoutes = require('./routes/gatepass');
 const financeRoutes = require('./routes/finance');
+const bankRoutes = require('./routes/banks');
 const notificationRoutes = require('./routes/notifications');
 
 const app = express();
@@ -79,6 +80,7 @@ app.use('/api/backup', backupRouter);
 app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/projects/:projectId/finance', financeRoutes);
 app.use('/api/finance', financeRoutes.globalRouter);
+app.use('/api/banks', bankRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 // Scheduled daily backup at 2:00 AM

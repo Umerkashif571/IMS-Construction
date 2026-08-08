@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Card, CardHeader, CardContent, Button, Modal, Input, Select, EmptyState, Badge, StatCard, LoadingSkeleton } from '../components/ui'
-import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, ShieldX, Info } from 'lucide-react'
+import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, ShieldX, Info, TrendingUp } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 
@@ -13,6 +13,7 @@ const TX_LABELS = {
   salary: 'Salary',
   petty_cash: 'Petty Cash',
   vendor_payment: 'Vendor Payment',
+  amount_received: 'Amount Received',
 }
 
 const COLORS = ['#059669', '#f59e0b', '#3b82f6']
@@ -46,6 +47,7 @@ export default function ProjectFinance({ projectId, projectName }) {
   const [salaries, setSalaries] = useState([])
   const [pettyCash, setPettyCash] = useState([])
   const [vendorPayments, setVendorPayments] = useState([])
+  const [amountReceived, setAmountReceived] = useState([])
   const [deletionRequests, setDeletionRequests] = useState([])
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -58,24 +60,27 @@ export default function ProjectFinance({ projectId, projectName }) {
   const canSeeVendors = user?.role !== 'manager'
   const isOwner = user?.role === 'owner'
 
-  const load = useCallback(() => {
+const load = useCallback(() => {
     setLoading(true)
     const base = `/projects/${projectId}/finance`
     const promises = [
       api.get(`${base}/summary`),
       api.get(`${base}/salaries`),
       api.get(`${base}/petty-cash`),
+      api.get(`${base}/amount-received`),
     ]
     if (canSeeVendors) promises.push(api.get(`${base}/vendor-payments`))
     if (canSeeDeletionRequests) promises.push(api.get(`${base}/deletion-requests`))
     promises.push(api.get('/vendors'))
-    Promise.all(promises).then(([s, sal, pc, vp, dr, v]) => {
-      setSummary(s.data)
-      setSalaries(sal.data || [])
-      setPettyCash(pc.data || [])
-      if (vp) setVendorPayments(vp.data || [])
-      if (dr) setDeletionRequests(dr.data || [])
-      setVendors(v.data || [])
+    Promise.all(promises).then(results => {
+      let i = 0
+      setSummary(results[i++].data)
+      setSalaries(results[i++].data || [])
+      setPettyCash(results[i++].data || [])
+      setAmountReceived(results[i++].data || [])
+      if (canSeeVendors) setVendorPayments(results[i++].data || [])
+      if (canSeeDeletionRequests) setDeletionRequests(results[i++].data || [])
+      setVendors(results[i].data || [])
     }).catch(err => { console.error(err); toast.error('Failed to load finance data') }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
@@ -83,7 +88,7 @@ export default function ProjectFinance({ projectId, projectName }) {
 
   const handleSave = async (type, form) => {
     try {
-      const pathMap = { salary: 'salaries', petty_cash: 'petty-cash', vendor_payment: 'vendor-payments' }
+      const pathMap = { salary: 'salaries', petty_cash: 'petty-cash', vendor_payment: 'vendor-payments', amount_received: 'amount-received' }
       await api.post(`/projects/${projectId}/finance/${pathMap[type]}`, form)
       toast.success(`${TX_LABELS[type]} added`)
       setAddModal(null)
@@ -147,10 +152,12 @@ export default function ProjectFinance({ projectId, projectName }) {
 
           {/* Summary cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Project Cost Value" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
+            <StatCard label="Project Cost" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
+            <StatCard label="Amount Received" value={formatPKR(summary?.amount_received_total)} icon={HandCoins} color="teal" />
             <StatCard label="Actual Cost" value={formatPKR(summary?.actual_cost)} icon={HandCoins} color="blue" />
-            <StatCard label="Balance" value={formatPKR(summary?.balance)} icon={Wallet} color={(summary?.balance || 0) < 0 ? 'red' : 'amber'} />
             <StatCard label="% Utilized" value={`${summary?.percent_utilized?.toFixed(1) || '0.0'}%`} icon={ClipboardList} color="purple" />
+            <StatCard label="Balance" value={formatPKR(summary?.balance_received)} icon={Wallet} color={(summary?.balance_received || 0) < 0 ? 'red' : 'green'} hint="Amount received minus actual cost" />
+            <StatCard label="Projected Profit / Loss" value={formatPKR(summary?.profit_loss)} icon={TrendingUp} color={(summary?.profit_loss || 0) < 0 ? 'red' : 'green'} hint="Project cost minus actual cost" />
           </div>
 
           {/* Cost breakdown */}
@@ -279,6 +286,38 @@ export default function ProjectFinance({ projectId, projectName }) {
             </Card>
           )}
 
+          {/* Amount Received */}
+          <Card>
+            <CardHeader title="Amount Received" action={canManage ? <Button size="sm" onClick={() => setAddModal('amount_received')}><Plus size={14} /> Add Receipt</Button> : null} />
+            <CardContent className="p-0">
+              {amountReceived.length === 0 ? (
+                <EmptyState icon={HandCoins} title="No payments received" text="Payments received from the client for this project will appear here" />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200"><tr>
+                      {['Date', 'Description', 'Amount', 'Status', 'Added By', 'Actions'].map(h => (
+                        <th key={h} className={`text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider ${h === 'Amount' ? 'text-right' : ''}`}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {amountReceived.map(ar => (
+                        <tr key={ar.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5 text-slate-500">{fmtDate(ar.received_date)}</td>
+                          <td className="px-4 py-2.5 font-medium">{ar.description || '-'}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{formatPKR(ar.amount)}</td>
+                          <td className="px-4 py-2.5">{txStatusBadge(ar.status)}</td>
+                          <td className="px-4 py-2.5 text-slate-500">{ar.created_by_name || '-'}</td>
+                          <td className="px-4 py-2.5">{canManage && deleteAction('amount_received', ar)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Deletion Requests (Owner/Admin only) */}
           {canSeeDeletionRequests && (
             <Card>
@@ -359,6 +398,9 @@ export default function ProjectFinance({ projectId, projectName }) {
       </Modal>
       <Modal isOpen={addModal === 'vendor_payment'} onClose={() => setAddModal(null)} title="Add Vendor Payment" size="max-w-md">
         <VendorPaymentForm vendors={vendors} onSave={(f) => handleSave('vendor_payment', f)} onCancel={() => setAddModal(null)} />
+      </Modal>
+      <Modal isOpen={addModal === 'amount_received'} onClose={() => setAddModal(null)} title="Add Amount Received" size="max-w-md">
+        <AmountReceivedForm onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
       </Modal>
 
       {/* Deletion reason modal */}
@@ -449,25 +491,35 @@ function PettyCashForm({ onSave, onCancel }) {
 function VendorPaymentForm({ vendors, onSave, onCancel }) {
   const [form, setForm] = useState({
     vendor_id: '', payment_type: 'fixed_otp', amount: '',
-    po_number: '', bill_number: '', ipc_percent_complete: '', payment_date: new Date().toISOString().slice(0, 10),
+    po_id: '', bill_number: '', ipc_percent_complete: '', payment_date: new Date().toISOString().slice(0, 10),
   })
+  const [pos, setPos] = useState([])
   const [errors, setErrors] = useState({})
+
+  useEffect(() => {
+    api.get('/purchase-orders').then(r => setPos(r.data || [])).catch(err => { console.error(err); toast.error('Failed to load purchase orders') })
+  }, [])
+
+  const vendorPos = form.vendor_id ? pos.filter(po => po.vendor_id === form.vendor_id && po.status !== 'cancelled') : []
+  const selectedPo = pos.find(po => po.id === form.po_id)
+  const isContinuous = form.payment_type === 'continuous'
 
   const handleSubmit = (e) => {
     e.preventDefault()
     const errs = {}
     if (!form.vendor_id) errs.vendor_id = 'Vendor is required'
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Valid amount required'
+    if (isContinuous && !form.po_id) errs.po_id = 'PO selection is required for continuous payments'
     if (form.payment_type === 'ipc' && (!form.ipc_percent_complete || parseFloat(form.ipc_percent_complete) < 0 || parseFloat(form.ipc_percent_complete) > 100))
       errs.ipc_percent_complete = 'IPC % complete (0-100) required'
     if (!form.payment_date) errs.payment_date = 'Payment date required'
     if (Object.keys(errs).length) return setErrors(errs)
-    onSave(form)
+    onSave({ ...form, po_id: isContinuous ? form.po_id : undefined, bill_number: isContinuous ? form.bill_number : undefined })
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Select label="Vendor *" value={form.vendor_id} onChange={e => setForm({ ...form, vendor_id: e.target.value })} error={errors.vendor_id}>
+      <Select label="Vendor *" value={form.vendor_id} onChange={e => setForm({ ...form, vendor_id: e.target.value, po_id: '' })} error={errors.vendor_id}>
         <option value="">Select vendor...</option>
         {(vendors || []).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
       </Select>
@@ -477,16 +529,61 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
         <option value="ipc">IPC</option>
       </Select>
       <Input label="Amount (PKR) *" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} error={errors.amount} />
-      <div className="grid grid-cols-2 gap-4">
-        <Input label="PO Number" value={form.po_number} onChange={e => setForm({ ...form, po_number: e.target.value })} />
-        <Input label="Bill Number" value={form.bill_number} onChange={e => setForm({ ...form, bill_number: e.target.value })} />
-      </div>
+      {isContinuous && (
+        <>
+          <div>
+            <Select label="Purchase Order *" value={form.po_id} onChange={e => setForm({ ...form, po_id: e.target.value })} error={errors.po_id}>
+              <option value="">Select PO...</option>
+              {vendorPos.map(po => (
+                <option key={po.id} value={po.id}>
+                  {po.po_number} {po.project_name ? `(${po.project_name})` : ''}
+                </option>
+              ))}
+            </Select>
+            {vendorPos.length === 0 && form.vendor_id && (
+              <p className="text-xs text-amber-600 mt-1">No active purchase orders found for this vendor</p>
+            )}
+          </div>
+          {selectedPo?.project_id && (
+            <p className="text-xs text-slate-400">Linked project: {selectedPo.project_name || selectedPo.project_id}</p>
+          )}
+          <Input label="Bill Number" value={form.bill_number} onChange={e => setForm({ ...form, bill_number: e.target.value })} />
+        </>
+      )}
       {form.payment_type === 'ipc' && (
         <Input label="IPC % Complete *" type="number" min="0" max="100" step="0.01" value={form.ipc_percent_complete} onChange={e => setForm({ ...form, ipc_percent_complete: e.target.value })} error={errors.ipc_percent_complete} />
       )}
       <Input label="Payment Date *" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} error={errors.payment_date} />
       <div className="flex gap-3 pt-2">
         <Button type="submit">Add Payment</Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+      </div>
+    </form>
+  )
+}
+
+function AmountReceivedForm({ onSave, onCancel }) {
+  const [form, setForm] = useState({
+    amount: '', received_date: new Date().toISOString().slice(0, 10), description: '',
+  })
+  const [errors, setErrors] = useState({})
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    const errs = {}
+    if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Valid amount required'
+    if (!form.received_date) errs.received_date = 'Received date required'
+    if (Object.keys(errs).length) return setErrors(errs)
+    onSave(form)
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <Input label="Amount Received (PKR) *" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} error={errors.amount} />
+      <Input label="Received Date *" type="date" value={form.received_date} onChange={e => setForm({ ...form, received_date: e.target.value })} error={errors.received_date} />
+      <Input label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+      <div className="flex gap-3 pt-2">
+        <Button type="submit">Add Receipt</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
