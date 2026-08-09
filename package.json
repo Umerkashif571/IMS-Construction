@@ -1,0 +1,18 @@
+{
+  "name": "ims-construction",
+  "version": "1.0.0",
+  "private": true,
+  "description": "IMS Construction — Vite/React frontend (client/) + Express backend (server/), deployed to Vercel as a static site + one serverless API function.",
+  "scripts": {
+    "build": "npm --prefix client run build",
+    "dev:client": "npm --prefix client run dev",
+    "dev:server": "npm --prefix server run dev",
+    "db:init": "npm --prefix server run db:init"
+  },
+  "dependencies": {
+    "serverless-http": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

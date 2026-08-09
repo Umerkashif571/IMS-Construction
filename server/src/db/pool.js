@@ -8,7 +8,16 @@ if (!process.env.DATABASE_URL && required.some(k => !process.env[k])) {
 }
 
 const pool = process.env.DATABASE_URL
-  ? new Pool({ connectionString: process.env.DATABASE_URL })
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      options: '-c search_path=public',
+      // Serverless (Vercel) uses short-lived processes and the Supabase
+      // transaction pooler — each function instance handles one request,
+      // so a single connection per instance is the right sizing.
+      max: process.env.VERCEL ? 1 : 10,
+      connectionTimeoutMillis: 10000,
+    })
   : new Pool({
       user: process.env.PGUSER,
       host: process.env.PGHOST,
