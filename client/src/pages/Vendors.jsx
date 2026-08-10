@@ -5,6 +5,7 @@ import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
 import { Plus, Search, FileText, PlusCircle, Edit3, Trash2, X, Building2, Printer, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const statusBadge = (s) => {
   const map = {
@@ -119,7 +120,7 @@ export default function Vendors() {
         items: poForm.items.map(it => ({ ...it, quantity: parseFloat(it.quantity) || 0, unit_price: parseFloat(it.unit_price) || 0 })),
         notes: poForm.notes
       })
-      toast.success('Purchase order created')
+      toast.success(`Purchase order ${data.po_number} created`)
       setCreatePoModal({ open: false, vendor: null })
       setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '' })
       setPoDetailModal({ open: true, po: data })
@@ -264,7 +265,7 @@ export default function Vendors() {
                           {statusBadge(po.status)}
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold">PKR {(parseFloat(po.total_amount) || 0).toLocaleString()}</span>
+                          <span className="text-sm font-semibold">{formatPKR(po.total_amount)}</span>
                           <ChevronRight size={16} className="text-gray-400" />
                         </div>
                       </div>
@@ -356,15 +357,15 @@ export default function Vendors() {
                       <td className="px-3 py-2 text-sm">{item.material_name}</td>
                       <td className="px-3 py-2 text-sm text-right">{(parseFloat(item.quantity) || 0).toLocaleString()}</td>
                       <td className="px-3 py-2 text-sm">{item.unit}</td>
-                      <td className="px-3 py-2 text-sm text-right">PKR {(parseFloat(item.unit_price) || 0).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-sm text-right">PKR {((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-sm text-right">{formatPKR(item.unit_price)}</td>
+                      <td className="px-3 py-2 text-sm text-right">{formatPKR(parseFloat(item.quantity) * parseFloat(item.unit_price))}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr className="font-bold">
                     <td colSpan={4} className="px-3 py-3 text-sm text-right border-t-2 border-gray-900">Total:</td>
-                    <td className="px-3 py-3 text-sm text-right border-t-2 border-gray-900">PKR {(parseFloat(poDetailModal.po.total_amount) || 0).toLocaleString()}</td>
+                    <td className="px-3 py-3 text-sm text-right border-t-2 border-gray-900">{formatPKR(poDetailModal.po.total_amount)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -378,15 +379,6 @@ export default function Vendors() {
       </Modal>
     </div>
   )
-}
-
-const formatPKR = (v) => {
-  const n = Math.round(parseFloat(v) || 0)
-  const sign = n < 0 ? '-' : ''
-  const s = String(Math.abs(n))
-  const last3 = s.slice(-3)
-  const rest = s.slice(0, -3)
-  return `Rs. ${sign}${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`
 }
 
 function OverviewPayments({ overview, payTypeFilter, setPayTypeFilter, formatPKR, statusBadge }) {

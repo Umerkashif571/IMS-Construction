@@ -5,20 +5,12 @@ import api from '../api'
 import { Badge, Button } from './ui'
 import { Bell, ShieldCheck, ShieldX, CheckCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const TX_LABELS = {
   salary: 'Salary',
   petty_cash: 'Petty Cash',
   vendor_payment: 'Vendor Payment',
-}
-
-const formatPKR = (v) => {
-  const n = Math.round(parseFloat(v) || 0)
-  const sign = n < 0 ? '-' : ''
-  const s = String(Math.abs(n))
-  const last3 = s.slice(-3)
-  const rest = s.slice(0, -3)
-  return `Rs. ${sign}${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`
 }
 
 const statusBadge = (d) => {

@@ -4,6 +4,7 @@ import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
 import { Plus, Search, Truck, Edit3, Trash2, Fuel, Wrench, ChevronRight, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const statusBadge = (s) => {
   const map = { active: 'success', under_maintenance: 'warning', idle: 'default', retired: 'error' }
@@ -143,7 +144,7 @@ export default function Vehicles() {
                                 <table className="w-full text-xs">
                                   <thead className="bg-slate-50"><tr>{['Date', 'Liters', 'Cost'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}</tr></thead>
                                   <tbody className="divide-y divide-slate-100">{fuelLogs.map(f => (
-                                    <tr key={f.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{f.created_at ? new Date(f.created_at).toLocaleDateString() : '-'}</td><td className="font-medium">{(parseFloat(f.liters) || 0).toFixed(1)}</td><td>PKR {(parseFloat(f.total_cost || f.cost) || 0).toLocaleString()}</td></tr>
+                                    <tr key={f.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{f.created_at ? new Date(f.created_at).toLocaleDateString() : '-'}</td><td className="font-medium">{(parseFloat(f.liters) || 0).toFixed(1)}</td><td>{formatPKR(f.total_cost || f.cost)}</td></tr>
                                   ))}</tbody>
                                 </table>
                               </div>
@@ -156,7 +157,7 @@ export default function Vehicles() {
                                 <table className="w-full text-xs">
                                   <thead className="bg-slate-50"><tr>{['Date', 'Type', 'Cost'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}</tr></thead>
                                   <tbody className="divide-y divide-slate-100">{maintLogs.map(m => (
-                                    <tr key={m.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString() : '-'}</td><td className="capitalize">{m.maintenance_type?.replace(/_/g, ' ')}</td><td>PKR {(parseFloat(m.cost) || 0).toLocaleString()}</td></tr>
+                                    <tr key={m.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString() : '-'}</td><td className="capitalize">{m.maintenance_type?.replace(/_/g, ' ')}</td><td>{formatPKR(m.cost)}</td></tr>
                                   ))}</tbody>
                                 </table>
                               </div>

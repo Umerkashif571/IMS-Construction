@@ -3,17 +3,16 @@ import api from '../api'
 import { Card, CardHeader, CardContent, Button, Modal, Input, EmptyState, Badge, StatCard, LoadingSkeleton } from '../components/ui'
 import { Landmark, Plus, Trash2, ArrowDownLeft, ArrowUpRight, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-const formatPKR = (v) => {
-  const n = Math.round(parseFloat(v) || 0)
-  const sign = n < 0 ? '-' : ''
-  const s = String(Math.abs(n))
-  const last3 = s.slice(-3)
-  const rest = s.slice(0, -3)
-  return `Rs. ${sign}${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`
-}
+import { formatPKR } from '../format'
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' }) : '-')
+
+const SOURCE_LABELS = {
+  vendor_payment: 'Vendor Payment',
+  salary: 'Salary',
+  petty_cash: 'Petty Cash',
+  amount_received: 'Amount Received',
+}
 
 const txStatusBadge = (s) => {
   const map = { active: 'success', deletion_requested: 'warning', deleted: 'error' }
@@ -118,7 +117,7 @@ export default function BankBook() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200"><tr>
-                        {['Date', 'Payee', 'Cheque No', 'Amount In', 'Amount Out', 'Running Balance', 'Status', 'Added By', 'Actions'].map(h => (
+                        {['Date', 'Payee', 'Cheque No', 'Amount In', 'Amount Out', 'Running Balance', 'Origin', 'Status', 'Added By', 'Actions'].map(h => (
                           <th key={h} className={`text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider ${['Amount In', 'Amount Out', 'Running Balance'].includes(h) ? 'text-right' : ''}`}>{h}</th>
                         ))}
                       </tr></thead>
@@ -131,10 +130,17 @@ export default function BankBook() {
                             <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{parseFloat(t.amount_in) > 0 ? formatPKR(t.amount_in) : '-'}</td>
                             <td className="px-4 py-2.5 text-right font-semibold text-red-600">{parseFloat(t.amount_out) > 0 ? formatPKR(t.amount_out) : '-'}</td>
                             <td className="px-4 py-2.5 text-right font-bold">{t.running_balance === null ? '-' : formatPKR(t.running_balance)}</td>
+                            <td className="px-4 py-2.5">
+                              {t.source_type === 'manual' || !t.source_type ? (
+                                <Badge variant="default">Manual</Badge>
+                              ) : (
+                                <Badge variant="warning">Auto — {SOURCE_LABELS[t.source_type] || t.source_type.replace(/_/g, ' ')}</Badge>
+                              )}
+                            </td>
                             <td className="px-4 py-2.5">{txStatusBadge(t.status)}</td>
                             <td className="px-4 py-2.5 text-slate-500">{t.created_by_name || '-'}</td>
                             <td className="px-4 py-2.5">
-                              {t.status === 'active' && (
+                              {t.status === 'active' && (!t.source_type || t.source_type === 'manual') && (
                                 <button
                                   onClick={() => { setDelReason(''); setDelTarget(t) }}
                                   className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors"

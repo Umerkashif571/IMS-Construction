@@ -114,22 +114,41 @@ router.get('/salaries', authenticate, async (req, res) => {
 
 router.post('/salaries', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { employee_name, amount, month } = req.body;
+    const { employee_name, amount, month, bank_id } = req.body;
     if (!employee_name) return res.status(400).json({ error: 'Employee name required' });
     if (!month) return res.status(400).json({ error: 'Month required' });
     const amt = parseAmount(amount);
     if (amt === null) return res.status(400).json({ error: 'Valid amount required' });
+    if (!bank_id) return res.status(400).json({ error: 'Bank is required' });
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
+    const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
+    if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const { rows } = await pool.query(
-      `INSERT INTO salaries (project_id, employee_name, amount, month, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [req.params.projectId, employee_name, amt, month, req.user.id]
-    );
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'salary', rows[0].id,
-      `Created salary record: ${employee_name} - PKR ${amt} for ${project.name}`);
-    await addActivity(req.user.full_name, 'created', `Added salary for ${employee_name} on project: ${project.name}`, 'salary', rows[0].id);
-    res.status(201).json(rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO salaries (project_id, employee_name, amount, month, bank_id, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [req.params.projectId, employee_name, amt, month, bank_id, req.user.id]
+      );
+      // Auto-link: salary paid from the selected bank account
+      await client.query(
+        `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_out, created_by, source_type, source_ref, source_party)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [bank_id, month, employee_name, amt, req.user.id, 'salary', rows[0].id, employee_name]
+      );
+      await client.query('COMMIT');
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'salary', rows[0].id,
+        `Created salary record: ${employee_name} - PKR ${amt} for ${project.name}`);
+      await addActivity(req.user.full_name, 'created', `Added salary for ${employee_name} on project: ${project.name}`, 'salary', rows[0].id);
+      res.status(201).json(rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -151,22 +170,41 @@ router.get('/petty-cash', authenticate, async (req, res) => {
 
 router.post('/petty-cash', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { description, amount, week_of } = req.body;
+    const { description, amount, week_of, bank_id } = req.body;
     if (!description) return res.status(400).json({ error: 'Description required' });
     if (!week_of) return res.status(400).json({ error: 'Week date required' });
     const amt = parseAmount(amount);
     if (amt === null) return res.status(400).json({ error: 'Valid amount required' });
+    if (!bank_id) return res.status(400).json({ error: 'Bank is required' });
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
+    const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
+    if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const { rows } = await pool.query(
-      `INSERT INTO petty_cash (project_id, description, amount, week_of, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [req.params.projectId, description, amt, week_of, req.user.id]
-    );
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash', rows[0].id,
-      `Created petty cash record: ${description} - PKR ${amt} on ${project.name}`);
-    await addActivity(req.user.full_name, 'created', `Added petty cash: ${description} on project: ${project.name}`, 'petty_cash', rows[0].id);
-    res.status(201).json(rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO petty_cash (project_id, description, amount, week_of, bank_id, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [req.params.projectId, description, amt, week_of, bank_id, req.user.id]
+      );
+      // Auto-link: petty cash spent from the selected bank account
+      await client.query(
+        `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_out, created_by, source_type, source_ref, source_party)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [bank_id, week_of, description, amt, req.user.id, 'petty_cash', rows[0].id, description]
+      );
+      await client.query('COMMIT');
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash', rows[0].id,
+        `Created petty cash record: ${description} - PKR ${amt} on ${project.name}`);
+      await addActivity(req.user.full_name, 'created', `Added petty cash: ${description} on project: ${project.name}`, 'petty_cash', rows[0].id);
+      res.status(201).json(rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -191,17 +229,20 @@ router.get('/vendor-payments', authenticate, async (req, res) => {
 
 router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { vendor_id, payment_type, amount, po_id, bill_number, ipc_percent_complete, payment_date } = req.body;
+    const { vendor_id, payment_type, amount, po_id, bill_number, ipc_percent_complete, payment_date, bank_id } = req.body;
     if (!vendor_id) return res.status(400).json({ error: 'Vendor required' });
     if (!payment_type || !['fixed_otp', 'continuous', 'ipc'].includes(payment_type))
       return res.status(400).json({ error: 'Valid payment type required' });
     if (!payment_date) return res.status(400).json({ error: 'Payment date required' });
     const amt = parseAmount(amount);
     if (amt === null) return res.status(400).json({ error: 'Valid amount required' });
+    if (!bank_id) return res.status(400).json({ error: 'Bank is required' });
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
     const vendorQ = await pool.query('SELECT id, name FROM vendors WHERE id=$1', [vendor_id]);
     if (vendorQ.rows.length === 0) return res.status(400).json({ error: 'Vendor not found' });
+    const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
+    if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
     let ipcPct = null;
     if (payment_type === 'ipc') {
@@ -229,15 +270,31 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
       billNo = bill_number || null;
     }
 
-    const { rows } = await pool.query(
-      `INSERT INTO vendor_payments (project_id, vendor_id, payment_type, amount, po_id, po_number, bill_number, ipc_percent_complete, payment_date, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [req.params.projectId, vendor_id, payment_type, amt, poId, poNumber, billNo, ipcPct, payment_date, req.user.id]
-    );
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'vendor_payment', rows[0].id,
-      `Created vendor payment: ${vendorQ.rows[0].name} - PKR ${amt} on ${project.name}`);
-    await addActivity(req.user.full_name, 'created', `Added vendor payment for ${vendorQ.rows[0].name} on project: ${project.name}`, 'vendor_payment', rows[0].id);
-    res.status(201).json({ ...rows[0], vendor_name: vendorQ.rows[0].name });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO vendor_payments (project_id, vendor_id, payment_type, amount, po_id, po_number, bill_number, ipc_percent_complete, payment_date, bank_id, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [req.params.projectId, vendor_id, payment_type, amt, poId, poNumber, billNo, ipcPct, payment_date, bank_id, req.user.id]
+      );
+      // Auto-link: vendor payment debited from the selected bank account
+      await client.query(
+        `INSERT INTO bank_transactions (bank_id, date, payee_name, cheque_no, amount_out, created_by, source_type, source_ref, source_party)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [bank_id, payment_date, vendorQ.rows[0].name, billNo || poNumber, amt, req.user.id, 'vendor_payment', rows[0].id, vendorQ.rows[0].name]
+      );
+      await client.query('COMMIT');
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'vendor_payment', rows[0].id,
+        `Created vendor payment: ${vendorQ.rows[0].name} - PKR ${amt} on ${project.name}`);
+      await addActivity(req.user.full_name, 'created', `Added vendor payment for ${vendorQ.rows[0].name} on project: ${project.name}`, 'vendor_payment', rows[0].id);
+      res.status(201).json({ ...rows[0], vendor_name: vendorQ.rows[0].name });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -259,22 +316,43 @@ router.get('/amount-received', authenticate, async (req, res) => {
 
 router.post('/amount-received', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { amount, received_date, description } = req.body;
+    const { amount, received_date, description, bank_id, received_from } = req.body;
     if (!received_date) return res.status(400).json({ error: 'Received date required' });
     const amt = parseAmount(amount);
     if (amt === null) return res.status(400).json({ error: 'Valid amount required' });
+    if (!bank_id) return res.status(400).json({ error: 'Bank is required' });
+    if (!received_from || !String(received_from).trim()) return res.status(400).json({ error: 'Received from (client/party) is required' });
+    const party = String(received_from).trim();
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
+    const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
+    if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const { rows } = await pool.query(
-      `INSERT INTO amount_received (project_id, amount, received_date, description, created_by)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [req.params.projectId, amt, received_date, description || null, req.user.id]
-    );
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'amount_received', rows[0].id,
-      `Created amount received record: PKR ${amt} on ${project.name}`);
-    await addActivity(req.user.full_name, 'created', `Recorded payment received: PKR ${amt} on project: ${project.name}`, 'amount_received', rows[0].id);
-    res.status(201).json(rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `INSERT INTO amount_received (project_id, amount, received_date, description, bank_id, received_from, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [req.params.projectId, amt, received_date, description || null, bank_id, party, req.user.id]
+      );
+      // Auto-link: amount received credited into the selected bank account
+      await client.query(
+        `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_in, created_by, source_type, source_ref, source_party)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [bank_id, received_date, party, amt, req.user.id, 'amount_received', rows[0].id, party]
+      );
+      await client.query('COMMIT');
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'amount_received', rows[0].id,
+        `Created amount received record: PKR ${amt} on ${project.name}`);
+      await addActivity(req.user.full_name, 'created', `Recorded payment received: PKR ${amt} on project: ${project.name}`, 'amount_received', rows[0].id);
+      res.status(201).json(rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -367,6 +445,14 @@ async function finalizeDeletionRequest(client, deletionRequest) {
     const table = TX_TABLES[deletionRequest.transaction_type];
     const txStatus = finalStatus === 'approved' ? 'deleted' : 'active';
     await client.query(`UPDATE ${table} SET status=$1 WHERE id=$2`, [txStatus, deletionRequest.transaction_id]);
+    // Auto-linked bank book entry (when the finance entry is deleted, the
+    // paired bank transaction is deleted too — no orphaned records).
+    if (finalStatus === 'approved' && ['vendor_payment', 'salary', 'petty_cash', 'amount_received'].includes(deletionRequest.transaction_type)) {
+      await client.query(
+        `UPDATE bank_transactions SET status='deleted' WHERE source_type=$1 AND source_ref=$2 AND status<>'deleted'`,
+        [deletionRequest.transaction_type, deletionRequest.transaction_id]
+      );
+    }
   }
   return finalStatus;
 }

@@ -5,6 +5,7 @@ import { Card, CardHeader, CardContent, Button, Modal, Input, Select, EmptyState
 import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, ShieldX, Info, TrendingUp } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const CAN_MANAGE = ['owner', 'admin', 'finance']
 const CAN_APPROVE = ['owner', 'admin']
@@ -17,15 +18,6 @@ const TX_LABELS = {
 }
 
 const COLORS = ['#059669', '#f59e0b', '#3b82f6']
-
-const formatPKR = (v) => {
-  const n = Math.round(parseFloat(v) || 0)
-  const sign = n < 0 ? '-' : ''
-  const s = String(Math.abs(n))
-  const last3 = s.slice(-3)
-  const rest = s.slice(0, -3)
-  return `Rs. ${sign}${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`
-}
 
 const txStatusBadge = (s) => {
   const map = { active: 'success', deletion_requested: 'warning', deleted: 'error' }
@@ -50,6 +42,7 @@ export default function ProjectFinance({ projectId, projectName }) {
   const [amountReceived, setAmountReceived] = useState([])
   const [deletionRequests, setDeletionRequests] = useState([])
   const [vendors, setVendors] = useState([])
+  const [banks, setBanks] = useState([])
   const [loading, setLoading] = useState(true)
   const [addModal, setAddModal] = useState(null)
   const [delModal, setDelModal] = useState({ open: false, type: null, id: null, label: '' })
@@ -72,6 +65,7 @@ const load = useCallback(() => {
     if (canSeeVendors) promises.push(api.get(`${base}/vendor-payments`))
     if (canSeeDeletionRequests) promises.push(api.get(`${base}/deletion-requests`))
     promises.push(api.get('/vendors'))
+    promises.push(api.get('/banks'))
     Promise.all(promises).then(results => {
       let i = 0
       setSummary(results[i++].data)
@@ -81,6 +75,7 @@ const load = useCallback(() => {
       if (canSeeVendors) setVendorPayments(results[i++].data || [])
       if (canSeeDeletionRequests) setDeletionRequests(results[i++].data || [])
       setVendors(results[i].data || [])
+      setBanks(results[i + 1].data || [])
     }).catch(err => { console.error(err); toast.error('Failed to load finance data') }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
@@ -391,16 +386,16 @@ const load = useCallback(() => {
 
       {/* Add modals */}
       <Modal isOpen={addModal === 'salary'} onClose={() => setAddModal(null)} title="Add Salary" size="max-w-md">
-        <SalaryForm onSave={(f) => handleSave('salary', f)} onCancel={() => setAddModal(null)} />
+        <SalaryForm banks={banks} onSave={(f) => handleSave('salary', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'petty_cash'} onClose={() => setAddModal(null)} title="Add Petty Cash Entry" size="max-w-md">
-        <PettyCashForm onSave={(f) => handleSave('petty_cash', f)} onCancel={() => setAddModal(null)} />
+        <PettyCashForm banks={banks} onSave={(f) => handleSave('petty_cash', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'vendor_payment'} onClose={() => setAddModal(null)} title="Add Vendor Payment" size="max-w-md">
-        <VendorPaymentForm vendors={vendors} onSave={(f) => handleSave('vendor_payment', f)} onCancel={() => setAddModal(null)} />
+        <VendorPaymentForm vendors={vendors} banks={banks} vendorPayments={vendorPayments} onSave={(f) => handleSave('vendor_payment', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'amount_received'} onClose={() => setAddModal(null)} title="Add Amount Received" size="max-w-md">
-        <AmountReceivedForm onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
+        <AmountReceivedForm banks={banks} onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
       </Modal>
 
       {/* Deletion reason modal */}
@@ -430,9 +425,9 @@ const load = useCallback(() => {
   )
 }
 
-function SalaryForm({ onSave, onCancel }) {
+function SalaryForm({ banks, onSave, onCancel }) {
   const [form, setForm] = useState({
-    employee_name: '', amount: '', month: new Date().toISOString().slice(0, 7) + '-01',
+    employee_name: '', amount: '', month: new Date().toISOString().slice(0, 7) + '-01', bank_id: '',
   })
   const [errors, setErrors] = useState({})
 
@@ -442,6 +437,7 @@ function SalaryForm({ onSave, onCancel }) {
     if (!form.employee_name.trim()) errs.employee_name = 'Employee name is required'
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Valid amount required'
     if (!form.month) errs.month = 'Month required'
+    if (!form.bank_id) errs.bank_id = 'Bank is required'
     if (Object.keys(errs).length) return setErrors(errs)
     onSave(form)
   }
@@ -451,6 +447,10 @@ function SalaryForm({ onSave, onCancel }) {
       <Input label="Employee Name *" value={form.employee_name} onChange={e => setForm({ ...form, employee_name: e.target.value })} error={errors.employee_name} />
       <Input label="Amount (PKR) *" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} error={errors.amount} />
       <Input label="Month *" type="date" value={form.month} onChange={e => setForm({ ...form, month: e.target.value })} error={errors.month} />
+      <Select label="Bank *" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })} error={errors.bank_id}>
+        <option value="">Select bank...</option>
+        {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </Select>
       <div className="flex gap-3 pt-2">
         <Button type="submit">Add Salary</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
@@ -459,9 +459,9 @@ function SalaryForm({ onSave, onCancel }) {
   )
 }
 
-function PettyCashForm({ onSave, onCancel }) {
+function PettyCashForm({ banks, onSave, onCancel }) {
   const [form, setForm] = useState({
-    description: '', amount: '', week_of: new Date().toISOString().slice(0, 10),
+    description: '', amount: '', week_of: new Date().toISOString().slice(0, 10), bank_id: '',
   })
   const [errors, setErrors] = useState({})
 
@@ -471,6 +471,7 @@ function PettyCashForm({ onSave, onCancel }) {
     if (!form.description.trim()) errs.description = 'Description is required'
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Valid amount required'
     if (!form.week_of) errs.week_of = 'Week date required'
+    if (!form.bank_id) errs.bank_id = 'Bank is required'
     if (Object.keys(errs).length) return setErrors(errs)
     onSave(form)
   }
@@ -480,6 +481,10 @@ function PettyCashForm({ onSave, onCancel }) {
       <Input label="Description *" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} error={errors.description} />
       <Input label="Amount (PKR) *" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} error={errors.amount} />
       <Input label="Week Of *" type="date" value={form.week_of} onChange={e => setForm({ ...form, week_of: e.target.value })} error={errors.week_of} />
+      <Select label="Bank *" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })} error={errors.bank_id}>
+        <option value="">Select bank...</option>
+        {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </Select>
       <div className="flex gap-3 pt-2">
         <Button type="submit">Add Entry</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
@@ -488,10 +493,10 @@ function PettyCashForm({ onSave, onCancel }) {
   )
 }
 
-function VendorPaymentForm({ vendors, onSave, onCancel }) {
+function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel }) {
   const [form, setForm] = useState({
     vendor_id: '', payment_type: 'fixed_otp', amount: '',
-    po_id: '', bill_number: '', ipc_percent_complete: '', payment_date: new Date().toISOString().slice(0, 10),
+    po_id: '', bill_number: '', ipc_percent_complete: '', payment_date: new Date().toISOString().slice(0, 10), bank_id: '',
   })
   const [pos, setPos] = useState([])
   const [errors, setErrors] = useState({})
@@ -504,6 +509,23 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
   const selectedPo = pos.find(po => po.id === form.po_id)
   const isContinuous = form.payment_type === 'continuous'
 
+  // Outstanding balance for the selected PO (PO total minus already paid, for partial payments)
+  const poOutstanding = (po) => {
+    const total = parseFloat(po?.total_amount) || 0
+    const paid = (vendorPayments || [])
+      .filter(vp => vp.po_id === po?.id && vp.status !== 'deleted')
+      .reduce((s, vp) => s + (parseFloat(vp.amount) || 0), 0)
+    return Math.max(0, Math.round((total - paid) * 100) / 100)
+  }
+
+  const handlePoSelect = (e) => {
+    const poId = e.target.value
+    const po = pos.find(p => p.id === poId)
+    const outstanding = poOutstanding(po)
+    // Auto-fill amount with the outstanding balance — user can still edit it
+    setForm({ ...form, po_id: poId, amount: outstanding > 0 ? String(outstanding) : '' })
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault()
     const errs = {}
@@ -513,13 +535,14 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
     if (form.payment_type === 'ipc' && (!form.ipc_percent_complete || parseFloat(form.ipc_percent_complete) < 0 || parseFloat(form.ipc_percent_complete) > 100))
       errs.ipc_percent_complete = 'IPC % complete (0-100) required'
     if (!form.payment_date) errs.payment_date = 'Payment date required'
+    if (!form.bank_id) errs.bank_id = 'Bank is required'
     if (Object.keys(errs).length) return setErrors(errs)
     onSave({ ...form, po_id: isContinuous ? form.po_id : undefined, bill_number: isContinuous ? form.bill_number : undefined })
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <Select label="Vendor *" value={form.vendor_id} onChange={e => setForm({ ...form, vendor_id: e.target.value, po_id: '' })} error={errors.vendor_id}>
+      <Select label="Vendor *" value={form.vendor_id} onChange={e => setForm({ ...form, vendor_id: e.target.value, po_id: '', amount: '' })} error={errors.vendor_id}>
         <option value="">Select vendor...</option>
         {(vendors || []).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
       </Select>
@@ -532,7 +555,7 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
       {isContinuous && (
         <>
           <div>
-            <Select label="Purchase Order *" value={form.po_id} onChange={e => setForm({ ...form, po_id: e.target.value })} error={errors.po_id}>
+            <Select label="Purchase Order *" value={form.po_id} onChange={handlePoSelect} error={errors.po_id}>
               <option value="">Select PO...</option>
               {vendorPos.map(po => (
                 <option key={po.id} value={po.id}>
@@ -544,8 +567,10 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
               <p className="text-xs text-amber-600 mt-1">No active purchase orders found for this vendor</p>
             )}
           </div>
-          {selectedPo?.project_id && (
-            <p className="text-xs text-slate-400">Linked project: {selectedPo.project_name || selectedPo.project_id}</p>
+          {selectedPo && (
+            <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+              Linked project: {selectedPo.project_name || '-'} · Outstanding: <b>{formatPKR(poOutstanding(selectedPo))}</b> auto-filled into Amount (editable)
+            </p>
           )}
           <Input label="Bill Number" value={form.bill_number} onChange={e => setForm({ ...form, bill_number: e.target.value })} />
         </>
@@ -554,6 +579,10 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
         <Input label="IPC % Complete *" type="number" min="0" max="100" step="0.01" value={form.ipc_percent_complete} onChange={e => setForm({ ...form, ipc_percent_complete: e.target.value })} error={errors.ipc_percent_complete} />
       )}
       <Input label="Payment Date *" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} error={errors.payment_date} />
+      <Select label="Bank *" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })} error={errors.bank_id}>
+        <option value="">Select bank...</option>
+        {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </Select>
       <div className="flex gap-3 pt-2">
         <Button type="submit">Add Payment</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
@@ -562,9 +591,9 @@ function VendorPaymentForm({ vendors, onSave, onCancel }) {
   )
 }
 
-function AmountReceivedForm({ onSave, onCancel }) {
+function AmountReceivedForm({ banks, onSave, onCancel }) {
   const [form, setForm] = useState({
-    amount: '', received_date: new Date().toISOString().slice(0, 10), description: '',
+    amount: '', received_date: new Date().toISOString().slice(0, 10), description: '', bank_id: '', received_from: '',
   })
   const [errors, setErrors] = useState({})
 
@@ -573,6 +602,8 @@ function AmountReceivedForm({ onSave, onCancel }) {
     const errs = {}
     if (!form.amount || parseFloat(form.amount) <= 0) errs.amount = 'Valid amount required'
     if (!form.received_date) errs.received_date = 'Received date required'
+    if (!form.bank_id) errs.bank_id = 'Bank is required'
+    if (!form.received_from.trim()) errs.received_from = 'Received from (client/party) is required'
     if (Object.keys(errs).length) return setErrors(errs)
     onSave(form)
   }
@@ -581,7 +612,12 @@ function AmountReceivedForm({ onSave, onCancel }) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <Input label="Amount Received (PKR) *" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} error={errors.amount} />
       <Input label="Received Date *" type="date" value={form.received_date} onChange={e => setForm({ ...form, received_date: e.target.value })} error={errors.received_date} />
+      <Input label="Received From (client/party) *" value={form.received_from} onChange={e => setForm({ ...form, received_from: e.target.value })} error={errors.received_from} />
       <Input label="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+      <Select label="Bank *" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })} error={errors.bank_id}>
+        <option value="">Select bank...</option>
+        {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+      </Select>
       <div className="flex gap-3 pt-2">
         <Button type="submit">Add Receipt</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>

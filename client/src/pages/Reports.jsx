@@ -3,6 +3,7 @@ import api, { downloadFile } from '../api'
 import { Button, LoadingSkeleton, EmptyState } from '../components/ui'
 import { BarChart3, Building2, Truck, Wrench, Settings, Package, Printer, FileSpreadsheet, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const reportTypes = [
   { key: 'stock-valuation', label: 'Stock Valuation', icon: BarChart3, color: 'border-blue-200 bg-blue-50' },
@@ -133,7 +134,7 @@ export default function Reports() {
                       {cfg.keys.map(k => (
                         <td key={k} className="px-4 py-3 text-gray-600">
                           {k === 'total_value' || k === 'total_amount' || k === 'unit_cost' || k === 'total_cost' || k === 'fuel_cost' || k === 'maintenance_cost'
-                            ? `PKR ${parseFloat(row[k] || 0).toLocaleString()}`
+                            ? formatPKR(row[k])
                             : k === 'created_at' || k === 'due_date' || k === 'checked_out_date' || k === 'returned_date' || k === 'next_due_date' || k === 'last_maintenance_date' || k === 'next_maintenance_date' || k === 'insurance_expiry' || k === 'registration_expiry' || k === 'order_date'
                             ? row[k] ? new Date(row[k]).toLocaleDateString() : '-'
                             : row[k] ?? '-'

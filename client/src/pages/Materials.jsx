@@ -6,6 +6,7 @@ import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton
 import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket } from 'lucide-react'
 import { GatePassDetail } from './GatePass'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 export default function Materials() {
   const { user } = useAuth()
@@ -204,8 +205,8 @@ export default function Materials() {
                 {(parseFloat(m.quantity) || 0) <= (parseFloat(m.reorder_level) || 0) && <CircleAlert size={14} className="inline ml-1 text-red-500" />}
               </Td>
               <Td><span className="text-slate-500">{m.unit || '-'}</span></Td>
-              <Td align="right">PKR {(parseFloat(m.unit_cost) || 0).toLocaleString()}</Td>
-              <Td align="right" className="font-semibold text-slate-800">PKR {((parseFloat(m.quantity) || 0) * (parseFloat(m.unit_cost) || 0)).toLocaleString()}</Td>
+              <Td align="right">{formatPKR(m.unit_cost)}</Td>
+              <Td align="right" className="font-semibold text-slate-800">{formatPKR((parseFloat(m.quantity) || 0) * (parseFloat(m.unit_cost) || 0))}</Td>
               <Td><span className="text-slate-500">{m.storage_location || '-'}</span></Td>
               <Td align="center">
                 <div className="flex items-center justify-center gap-1">
@@ -243,7 +244,7 @@ export default function Materials() {
                 ['SKU', detailModal.material.sku],
                 ['Category', detailModal.material.category_name],
                 ['Current Quantity', `${(parseFloat(detailModal.material.quantity) || 0).toLocaleString()} ${detailModal.material.unit}`],
-                ['Unit Cost', `PKR ${(parseFloat(detailModal.material.unit_cost) || 0).toLocaleString()}`],
+                ['Unit Cost', formatPKR(detailModal.material.unit_cost)],
                 ['Storage Location', detailModal.material.storage_location],
                 ['Warehouse', detailModal.material.warehouse_name],
                 ['Supplier', detailModal.material.supplier_name],
@@ -331,7 +332,7 @@ export default function Materials() {
           <Select label="Linked PO (optional)" value={stockInQty.po_id} onChange={e => setStockInQty({ ...stockInQty, po_id: e.target.value })}>
             <option value="">No PO link</option>
             {availablePos.filter(p => p.status === 'approved' || p.status === 'partial_received').map(p => (
-              <option key={p.id} value={p.id}>{p.po_number} - {p.vendor_name} (PKR {(parseFloat(p.total_amount) || 0).toLocaleString()})</option>
+              <option key={p.id} value={p.id}>{p.po_number} - {p.vendor_name} ({formatPKR(p.total_amount)})</option>
             ))}
           </Select>
           <Select label="Source *" value={stockInQty.source} onChange={e => setStockInQty({ ...stockInQty, source: e.target.value })}>

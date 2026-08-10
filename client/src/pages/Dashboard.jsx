@@ -6,6 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import api from '../api'
 import { StatCard, Card, CardHeader, CardContent, LoadingSkeleton, EmptyState } from '../components/ui'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 export default function Dashboard() {
   const [data, setData] = useState(null)
@@ -33,7 +34,7 @@ export default function Dashboard() {
   )
 
   const cards = [
-    { label: 'Inventory Value', value: `PKR ${(data?.inventory_value || 0).toLocaleString()}`, icon: DollarSign, color: 'emerald', to: '/materials' },
+    { label: 'Inventory Value', value: formatPKR(data?.inventory_value), icon: DollarSign, color: 'emerald', to: '/materials' },
     { label: 'Active Projects', value: data?.active_projects || 0, icon: Building2, color: 'blue', to: '/projects' },
     { label: 'Vehicles in Use', value: data?.vehicles_active || 0, icon: Truck, color: 'amber', to: '/vehicles' },
     { label: 'Tools Checked Out', value: data?.tools_checked_out || 0, icon: Wrench, color: 'purple', to: '/tools' },
@@ -92,7 +93,7 @@ export default function Dashboard() {
                     <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : v} />
                     <Tooltip
                       contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                      formatter={v => [`PKR ${Number(v).toLocaleString()}`, 'Material Cost']}
+                      formatter={v => [formatPKR(v), 'Material Cost']}
                     />
                     <Bar dataKey="cost" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={40} />
                   </BarChart>
@@ -126,7 +127,7 @@ export default function Dashboard() {
                     </Pie>
                     <Tooltip
                       contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                      formatter={v => [`PKR ${Number(v).toLocaleString()}`, 'Value']}
+                      formatter={v => [formatPKR(v), 'Value']}
                     />
                     <Legend
                       layout="vertical"

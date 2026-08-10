@@ -6,6 +6,7 @@ import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyStat
 import ProjectFinance from '../components/ProjectFinance'
 import { Plus, Search, Building2, Edit3, Trash2, ExternalLink, Package, Construction } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { formatPKR } from '../format'
 
 const statusBadge = (s) => {
   const map = { planning: 'info', active: 'success', on_hold: 'warning', completed: 'default', cancelled: 'error' }
@@ -111,7 +112,7 @@ export default function Projects() {
                   <td className="px-4 py-3"><button onClick={() => openDetail(p)} className="font-medium text-amber-600 hover:text-amber-700 hover:underline text-left flex items-center gap-1">{p.name} <ExternalLink size={12} /></button></td>
                   <td className="px-4 py-3 text-slate-500">{p.client || '-'}</td>
                   <td className="px-4 py-3 text-slate-500">{[p.location, p.city].filter(Boolean).join(', ') || '-'}</td>
-                  <td className="px-4 py-3 font-semibold text-emerald-600">PKR {(parseFloat(p.total_material_cost) || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 font-semibold text-emerald-600">{formatPKR(p.total_material_cost)}</td>
                   <td className="px-4 py-3">{statusBadge(p.status)}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{p.start_date ? new Date(p.start_date).toLocaleDateString() : '-'}</td>
                   <td className="px-4 py-3 text-xs text-slate-500">{p.end_date ? new Date(p.end_date).toLocaleDateString() : '-'}</td>
@@ -160,7 +161,7 @@ export default function Projects() {
               <div className="space-y-6">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 rounded-xl p-5">
                   {[
-                    ['Client', detailModal.project.client], ['Location', [detailModal.project.location, detailModal.project.city].filter(Boolean).join(', ')], ['Status', statusBadge(detailModal.project.status)], ['Total Material Invested', <span className="text-lg font-bold text-emerald-600">PKR {(parseFloat(detailModal.project.total_material_cost) || 0).toLocaleString()}</span>],
+                    ['Client', detailModal.project.client], ['Location', [detailModal.project.location, detailModal.project.city].filter(Boolean).join(', ')], ['Status', statusBadge(detailModal.project.status)], ['Total Material Invested', <span className="text-lg font-bold text-emerald-600">{formatPKR(detailModal.project.total_material_cost)}</span>],
                   ].map(([label, value]) => (
                     <div key={label}><span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{label}</span><span className="text-sm font-semibold text-slate-800">{value || '-'}</span></div>
                   ))}
@@ -182,13 +183,13 @@ export default function Projects() {
                               <td className="px-4 py-2.5 text-slate-500 font-mono text-xs">{m.sku || '-'}</td>
                               <td className="px-4 py-2.5">{(parseFloat(m.total_quantity) || 0).toLocaleString()}</td>
                               <td className="px-4 py-2.5 text-slate-500">{m.unit || '-'}</td>
-                              <td className="px-4 py-2.5">PKR {(parseFloat(m.unit_cost) || 0).toLocaleString()}</td>
-                              <td className="px-4 py-2.5 font-semibold">PKR {(parseFloat(m.total_cost) || 0).toLocaleString()}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="bg-slate-50 font-medium">
-                          <tr><td colSpan={5} className="px-4 py-2.5 text-right text-slate-700">Total:</td><td className="px-4 py-2.5 text-emerald-600 font-bold">PKR {detailModal.materials.reduce((s, m) => s + (parseFloat(m.total_cost) || 0), 0).toLocaleString()}</td></tr>
+                              <td className="px-4 py-2.5">{formatPKR(m.unit_cost)}</td>
+                              <td className="px-4 py-2.5 font-semibold">{formatPKR(m.total_cost)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                          <tr><td colSpan={5} className="px-4 py-2.5 text-right text-slate-700">Total:</td><td className="px-4 py-2.5 text-emerald-600 font-bold">{formatPKR(detailModal.materials.reduce((s, m) => s + (parseFloat(m.total_cost) || 0), 0))}</td></tr>
                         </tfoot>
                       </table>
                     </div>

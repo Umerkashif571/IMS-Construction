@@ -5,6 +5,18 @@ const { logAudit, addActivity, notifyRoles, createNotification } = require('../d
 
 const router = express.Router();
 
+// Sequential, human-readable PO number: PO-YYYY-NNN (zero-padded, per year).
+// Historical POs keep their existing numbers; only new POs use this format.
+async function nextPoNumber() {
+  const year = new Date().getFullYear();
+  const { rows } = await pool.query(
+    `SELECT COALESCE(MAX((REGEXP_MATCH(po_number, '^PO-' || $1 || '-([0-9]+)$'))[1]::int), 0)::int AS max_seq
+     FROM purchase_orders WHERE po_number ~ ('^PO-' || $1 || '-[0-9]+$')`,
+    [String(year)]
+  );
+  return `PO-${year}-${String(rows[0].max_seq + 1).padStart(3, '0')}`;
+}
+
 router.get('/', authenticate, async (req, res) => {
   try {
     const { search, status } = req.query;
@@ -90,8 +102,7 @@ router.post('/pos', authenticate, authorize('owner', 'admin', 'procurement_offic
     if (!vendor_id || !items || items.length === 0) return res.status(400).json({ error: 'Vendor and items required' });
     if (!project_id) project_id = null;
     // Generate PO number
-    const { rows: count } = await pool.query("SELECT COUNT(*) as c FROM purchase_orders");
-    const poNum = `PO-${new Date().getFullYear()}-${String(parseInt(count[0].c) + 1).padStart(4, '0')}`;
+    const poNum = await nextPoNumber();
 
     const total_amount = items.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price)), 0);
 
@@ -158,7 +169,7 @@ router.post('/:id/purchase-orders', authenticate, authorize('owner', 'admin', 'p
     const { rows: vendor } = await pool.query('SELECT name FROM vendors WHERE id=$1', [req.params.id]);
     if (vendor.length === 0) return res.status(404).json({ error: 'Vendor not found' });
 
-    const poNum = 'PO-' + Date.now();
+    const poNum = await nextPoNumber();
     const total_amount = items.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price)), 0);
 
     const { rows: po } = await pool.query(
