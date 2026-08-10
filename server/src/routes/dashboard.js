@@ -7,32 +7,30 @@ const router = express.Router();
 router.get('/', authenticate, async (req, res) => {
   try {
     const [inventoryValue, activeProjects, vehiclesActive, toolsCheckedOut,
-       lowStock, maintenanceDue, recentActivity] = await Promise.all([
+       lowStock, maintenanceDue, recentActivity, projectBudgets, categoryBreakdown] = await Promise.all([
       pool.query(`SELECT COALESCE(SUM(quantity * unit_cost), 0) as total_value FROM materials WHERE is_active=true`),
       pool.query(`SELECT COUNT(*) as count FROM projects WHERE status='active'`),
       pool.query(`SELECT COUNT(*) as count FROM vehicles WHERE current_status='active'`),
       pool.query(`SELECT COUNT(*) as count FROM tools WHERE current_status='checked_out'`),
       pool.query(`SELECT COUNT(*) as count FROM materials WHERE is_active=true AND quantity <= reorder_level`),
       pool.query(`SELECT COUNT(*) as count FROM vehicles WHERE current_status!='retired' AND next_maintenance_date IS NOT NULL AND next_maintenance_date <= NOW() + INTERVAL '30 days'`),
-      pool.query(`SELECT * FROM activity_feed ORDER BY created_at DESC LIMIT 20`)
+      pool.query(`SELECT * FROM activity_feed ORDER BY created_at DESC LIMIT 20`),
+      pool.query(
+        `SELECT p.id, p.name,
+          COALESCE(SUM(mt.quantity * m.unit_cost), 0) as total_material_cost
+         FROM projects p
+         LEFT JOIN material_transactions mt ON mt.project_id = p.id AND mt.type = 'out'
+         LEFT JOIN materials m ON mt.material_id = m.id
+         WHERE p.status IN ('active', 'planning')
+         GROUP BY p.id, p.name
+         ORDER BY total_material_cost DESC`
+      ),
+      pool.query(
+        `SELECT c.name, COALESCE(SUM(m.quantity * m.unit_cost), 0) as total_value
+         FROM categories c LEFT JOIN materials m ON c.id=m.category_id AND m.is_active=true
+         GROUP BY c.name ORDER BY total_value DESC`
+      )
     ]);
-
-    const projectBudgets = await pool.query(
-      `SELECT p.id, p.name,
-        COALESCE(SUM(mt.quantity * m.unit_cost), 0) as total_material_cost
-       FROM projects p
-       LEFT JOIN material_transactions mt ON mt.project_id = p.id AND mt.type = 'out'
-       LEFT JOIN materials m ON mt.material_id = m.id
-       WHERE p.status IN ('active', 'planning')
-       GROUP BY p.id, p.name
-       ORDER BY total_material_cost DESC`
-    );
-
-    const categoryBreakdown = await pool.query(
-      `SELECT c.name, COALESCE(SUM(m.quantity * m.unit_cost), 0) as total_value
-       FROM categories c LEFT JOIN materials m ON c.id=m.category_id AND m.is_active=true
-       GROUP BY c.name ORDER BY total_value DESC`
-    );
 
     res.json({
       inventory_value: parseFloat(inventoryValue.rows[0].total_value),

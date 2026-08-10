@@ -15,16 +15,16 @@ function parseAmount(v) {
 // GET /api/banks — list banks with running balance per bank
 router.get('/', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { rows: banks } = await pool.query('SELECT * FROM banks ORDER BY created_at DESC');
-    const result = [];
-    for (const bank of banks) {
-      const balQ = await pool.query(
-        `SELECT COALESCE(SUM(amount_in), 0)::float - COALESCE(SUM(amount_out), 0)::float as balance
-         FROM bank_transactions WHERE bank_id=$1 AND status<>'deleted'`,
-        [bank.id]
-      );
-      result.push({ ...bank, balance: parseFloat(balQ.rows[0].balance) || 0 });
-    }
+    const { rows } = await pool.query(
+      `SELECT b.*,
+              COALESCE(SUM(CASE WHEN bt.status <> 'deleted' THEN bt.amount_in ELSE 0 END), 0)::float
+                - COALESCE(SUM(CASE WHEN bt.status <> 'deleted' THEN bt.amount_out ELSE 0 END), 0)::float as balance
+       FROM banks b
+       LEFT JOIN bank_transactions bt ON bt.bank_id = b.id
+       GROUP BY b.id
+       ORDER BY b.created_at DESC`
+    );
+    const result = rows.map(bank => ({ ...bank, balance: parseFloat(bank.balance) || 0 }));
     res.json(result);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });

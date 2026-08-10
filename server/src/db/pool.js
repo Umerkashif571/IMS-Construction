@@ -16,7 +16,8 @@ const pool = process.env.DATABASE_URL
       // transaction pooler — each function instance handles one request,
       // so a single connection per instance is the right sizing.
       max: process.env.VERCEL ? 1 : 10,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: 3000,
+      idleTimeoutMillis: 5000,
     })
   : new Pool({
       user: process.env.PGUSER,

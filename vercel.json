@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "regions": ["sin1"],
   "installCommand": "npm install && npm --prefix server install && npm --prefix client install",
   "buildCommand": "npm --prefix client run build",
   "builds": [

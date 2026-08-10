@@ -14,14 +14,33 @@ async function authenticate(req, res, next) {
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
+
+  // The token carries the user identity signed at login, so reads can be
+  // served without an extra round trip to the database. Mutations still
+  // verify the account is active (cheap indexed lookup) so deactivated
+  // users cannot keep writing before their token expires.
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      full_name: decoded.full_name,
+      role: decoded.role
+    };
+    return next();
+  }
+
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, full_name, role, is_active FROM users WHERE id = $1',
+      'SELECT id, is_active FROM users WHERE id = $1',
       [decoded.id]
     );
-    if (rows.length === 0) return res.status(401).json({ error: 'Invalid or expired token' });
-    if (!rows[0].is_active) return res.status(401).json({ error: 'Account deactivated' });
-    req.user = { id: rows[0].id, email: rows[0].email, full_name: rows[0].full_name, role: rows[0].role };
+    if (rows.length === 0 || !rows[0].is_active) return res.status(401).json({ error: 'Account deactivated' });
+    req.user = {
+      id: decoded.id,
+      email: decoded.email,
+      full_name: decoded.full_name,
+      role: decoded.role
+    };
     next();
   } catch (err) {
     console.error('Auth DB error:', err);
