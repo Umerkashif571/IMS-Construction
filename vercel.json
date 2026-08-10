@@ -12,8 +12,5 @@
     { "src": "/assets/(.*)", "dest": "/client/dist/assets/$1" },
     { "src": "/favicon.ico", "dest": "/client/dist/favicon.ico" },
     { "src": "/(.*)", "dest": "/client/dist/index.html" }
-  ],
-  "functions": {
-    "api/index.js": { "maxDuration": 30 }
-  }
+  ]
 }
