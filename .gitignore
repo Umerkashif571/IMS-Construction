@@ -6,8 +6,7 @@ client/.env
 # Dependencies
 node_modules/
 
-# Build output
-client/dist/
+# Build output (client/dist is committed so git-based Vercel deploys include static files)
 
 # Backups
 server/backups/
