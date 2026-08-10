@@ -13,9 +13,11 @@ const pool = process.env.DATABASE_URL
       ssl: { rejectUnauthorized: false },
       options: '-c search_path=public',
       // Serverless (Vercel) uses short-lived processes and the Supabase
-      // transaction pooler — each function instance handles one request,
-      // so a single connection per instance is the right sizing.
-      max: process.env.VERCEL ? 1 : 10,
+      // transaction pooler — a handful of connections per instance lets
+      // Promise.all() batches inside one request run concurrently instead
+      // of serializing on a single connection (4 was verified safe well
+      // under the pooler's 60-connection limit; instances reap lazily).
+      max: process.env.VERCEL ? 4 : 10,
       connectionTimeoutMillis: 3000,
       idleTimeoutMillis: 5000,
     })
