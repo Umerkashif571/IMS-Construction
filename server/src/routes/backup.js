@@ -1,14 +1,25 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit } = require('../db/helpers');
 
 const router = express.Router();
-const BACKUP_DIR = path.join(__dirname, '..', '..', 'backups');
 
-if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+// Backups live on disk next to the repo. In serverless (Vercel) the bundle
+// filesystem is read-only (/var/task), so we resolve to the writable /tmp
+// directory instead. Never crash the module on import — a backup dir that
+// cannot be created is handled per-request instead.
+const BACKUP_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'ims-backups')
+  : path.join(__dirname, '..', '..', 'backups');
+
+function ensureBackupDir() {
+  try { fs.mkdirSync(BACKUP_DIR, { recursive: true }); } catch (err) { console.error('Backup dir unavailable:', err.message); }
+}
+ensureBackupDir();
 
 function safeBackupName(filename) {
   if (typeof filename !== 'string') return null;
@@ -20,6 +31,7 @@ function safeBackupName(filename) {
 
 router.get('/export', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
+    ensureBackupDir();
     const filename = `ims_backup_${new Date().toISOString().split('T')[0]}_${Date.now()}.sql`;
     const filepath = path.join(BACKUP_DIR, filename);
     const dump = await dumpWithoutPgDump();
