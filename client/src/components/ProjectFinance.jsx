@@ -147,12 +147,23 @@ const load = useCallback(() => {
 
           {/* Summary cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard label="Project Cost" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
-            <StatCard label="Amount Received" value={formatPKR(summary?.amount_received_total)} icon={HandCoins} color="teal" />
-            <StatCard label="Actual Cost" value={formatPKR(summary?.actual_cost)} icon={HandCoins} color="blue" />
-            <StatCard label="% Utilized" value={`${summary?.percent_utilized?.toFixed(1) || '0.0'}%`} icon={ClipboardList} color="purple" />
-            <StatCard label="Balance" value={formatPKR(summary?.balance_received)} icon={Wallet} color={(summary?.balance_received || 0) < 0 ? 'red' : 'green'} hint="Amount received minus actual cost" />
-            <StatCard label="Projected Profit / Loss" value={formatPKR(summary?.profit_loss)} icon={TrendingUp} color={(summary?.profit_loss || 0) < 0 ? 'red' : 'green'} hint="Project cost minus actual cost" />
+            {user?.role === 'manager' ? (
+              <>
+                <StatCard label="Project Cost Value" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
+                <StatCard label="Actual Cost" value={formatPKR(summary?.actual_cost)} icon={HandCoins} color="blue" />
+                <StatCard label="Cash Balance" value={formatPKR(summary?.balance_received)} icon={Wallet} color={(summary?.balance_received || 0) < 0 ? 'red' : 'green'} hint="Amount received minus actual cost" />
+                <StatCard label="Profit / Loss" value={formatPKR(summary?.profit_loss)} icon={TrendingUp} color={(summary?.profit_loss || 0) < 0 ? 'red' : 'green'} hint="Project cost value minus actual cost" />
+              </>
+            ) : (
+              <>
+                <StatCard label="Project Cost Value" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
+                <StatCard label="Amount Received" value={formatPKR(summary?.amount_received_total)} icon={HandCoins} color="teal" />
+                <StatCard label="Actual Cost" value={formatPKR(summary?.actual_cost)} icon={HandCoins} color="blue" />
+                <StatCard label="Cash Balance" value={formatPKR(summary?.balance_received)} icon={Wallet} color={(summary?.balance_received || 0) < 0 ? 'red' : 'green'} hint="Amount received minus actual cost" />
+                <StatCard label="Profit / Loss" value={formatPKR(summary?.profit_loss)} icon={TrendingUp} color={(summary?.profit_loss || 0) < 0 ? 'red' : 'green'} hint="Project cost value minus actual cost" />
+                <StatCard label="% Utilized" value={`${summary?.percent_utilized?.toFixed(1) || '0.0'}%`} icon={ClipboardList} color="purple" />
+              </>
+            )}
           </div>
 
           {/* Cost breakdown */}

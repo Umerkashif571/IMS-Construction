@@ -38,7 +38,7 @@ function parseAmount(v) {
   return isNaN(n) || n < 0 ? null : n;
 }
 
-// GET /summary — project_cost_value, actual_cost, balance, percent_utilized
+// GET /summary — project_cost_value, actual_cost, balance_received, profit_loss, percent_utilized
 // PM: limited summary (salaries + petty cash only, no vendor breakdown)
 router.get('/summary', authenticate, async (req, res) => {
   try {
@@ -74,7 +74,6 @@ router.get('/summary', authenticate, async (req, res) => {
     const vendorIncluded = isFull;
     const actualCost = salariesTotal + pettyCashTotal + (vendorIncluded ? vendorPaymentsTotal : 0);
     const projectCostValue = parseFloat(project.project_cost_value) || 0;
-    const balance = projectCostValue - actualCost;
     const balanceReceived = amountReceivedTotal - actualCost;
     const profitLoss = projectCostValue - actualCost;
     const percentUtilized = projectCostValue > 0 ? (actualCost / projectCostValue) * 100 : 0;
@@ -82,7 +81,6 @@ router.get('/summary', authenticate, async (req, res) => {
     const payload = {
       project_cost_value: projectCostValue,
       actual_cost: actualCost,
-      balance,
       balance_received: balanceReceived,
       profit_loss: profitLoss,
       amount_received_total: amountReceivedTotal,
