@@ -1,0 +1,20 @@
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+const { Pool } = require('pg');
+const p = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+(async () => {
+  const q1 = await p.query("select po_number, status, project_id is null as no_project, vendor_name from purchase_orders order by created_at");
+  console.log('POs (with null-project flag):');
+  q1.rows.forEach(r => console.log(' ', r.po_number, '|', r.status, '| nullProj=' + r.no_project, '|', r.vendor_name));
+  const q2 = await p.query("select p.po_id, p.po_number, p.status as pay_status, po.status as po_status, po.admin_approval, po.owner_approval from vendor_payments p left join purchase_orders po on po.id = p.po_id where p.po_id is not null");
+  console.log('Payments linked to POs:');
+  q2.rows.forEach(r => console.log(' ', r.po_number, '| paymentStatus=' + r.pay_status, '| poStatus=' + r.po_status));
+  const q3 = await p.query("select count(*)::int n from vendor_payments where payment_type='continuous'");
+  console.log('continuous payments:', q3.rows[0].n);
+  const q4 = await p.query("select count(*)::int n from projects where status='active' or status='planning'");
+  console.log('active/planning projects:', q4.rows[0].n);
+  const q5 = await p.query("select count(*)::int n from petty_cash where status <> 'deleted'");
+  console.log('non-deleted petty cash:', q5.rows[0].n);
+  const q6 = await p.query("select min(created_at)::date d, count(*)::int n from deletion_requests");
+  console.log('deletion requests:', JSON.stringify(q6.rows[0]));
+  await p.end();
+})().catch(e => { console.error('ERR', e.message); process.exit(1) });
