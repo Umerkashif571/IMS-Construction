@@ -17,9 +17,10 @@ const pool = process.env.DATABASE_URL
       // Promise.all() batches inside one request run concurrently instead
       // of serializing on a single connection (4 was verified safe well
       // under the pooler's 60-connection limit; instances reap lazily).
+      // Long-running local processes tolerate longer idle/connect windows.
       max: process.env.VERCEL ? 4 : 10,
-      connectionTimeoutMillis: 3000,
-      idleTimeoutMillis: 5000,
+      connectionTimeoutMillis: process.env.VERCEL ? 3000 : 8000,
+      idleTimeoutMillis: process.env.VERCEL ? 5000 : 30000,
     })
   : new Pool({
       user: process.env.PGUSER,

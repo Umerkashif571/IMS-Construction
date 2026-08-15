@@ -15,8 +15,11 @@ async function seedDatabase() {
     const { rows: existing } = await client.query('SELECT COUNT(*) as count FROM users');
     if (parseInt(existing[0].count) > 0) {
       console.log('Database already seeded, skipping...');
+      // NOTE: do NOT release here — the finally block owns the single release.
+      // An early release here caused a double-release (pg-pool throws
+      // "Release called on client which has already been released to the pool")
+      // which crashed the long-running server after boot.
       await client.query('ROLLBACK');
-      client.release();
       return;
     }
 
@@ -253,7 +256,10 @@ async function seedDatabase() {
     console.error('Seed error:', err);
     throw err;
   } finally {
-    if (!client._released) client.release();
+    // Idempotent release — pg-pool throws if a client is released twice.
+    try { client.release(); } catch (e) {
+      console.error('Seed client release error:', e.message);
+    }
   }
 }
 
