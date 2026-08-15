@@ -15,6 +15,7 @@ const TX_TABLES = {
   vendor_payment: 'vendor_payments',
   bank_transaction: 'bank_transactions',
   amount_received: 'amount_received',
+  petty_cash_utilization: 'petty_cash_utilization',
 };
 
 const TX_LABELS = {
@@ -23,6 +24,7 @@ const TX_LABELS = {
   vendor_payment: 'Vendor Payment',
   bank_transaction: 'Bank Transaction',
   amount_received: 'Amount Received',
+  petty_cash_utilization: 'Petty Cash Utilization',
 };
 
 const VALID_TX_TYPES = Object.keys(TX_TABLES);
@@ -38,13 +40,30 @@ function parseAmount(v) {
   return isNaN(n) || n < 0 ? null : n;
 }
 
+// Part 3: project-scoping for PM — a manager may only access finance data for
+// projects they are explicitly assigned to (project_managers table).
+// This is enforced server-side, not just hidden in the UI.
+async function assertManagerProjectAccess(projectId, user, res) {
+  if (user.role !== 'manager') return true;
+  const { rows } = await pool.query(
+    'SELECT 1 FROM project_managers WHERE project_id=$1 AND user_id=$2',
+    [projectId, user.id]
+  );
+  if (rows.length === 0) {
+    res.status(403).json({ error: 'Access denied: you are not assigned to this project' });
+    return false;
+  }
+  return true;
+}
+
 // GET /summary — project_cost_value, actual_cost, balance_received, profit_loss, percent_utilized
 // PM: limited summary (salaries + petty cash only, no vendor breakdown)
 router.get('/summary', authenticate, async (req, res) => {
   try {
-    const isFull = FULL_ACCESS.includes(req.user.role);
+const isFull = FULL_ACCESS.includes(req.user.role);
     const isPM = PM_ACCESS.includes(req.user.role);
     if (!isFull && !isPM) return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
 
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
@@ -55,6 +74,15 @@ router.get('/summary', authenticate, async (req, res) => {
     );
     const pettyQ = await pool.query(
       `SELECT COALESCE(SUM(amount), 0)::float as total FROM petty_cash WHERE project_id=$1 AND status<>'deleted'`,
+      [req.params.projectId]
+    );
+    // "Utilized" = what has actually been spent out of each disbursement
+    // (partial spends over time). Profit/Loss reflects utilized, not disbursed.
+    const pettyUtilQ = await pool.query(
+      `SELECT COALESCE(SUM(pu.amount), 0)::float as total
+       FROM petty_cash_utilization pu
+       JOIN petty_cash p ON p.id = pu.petty_cash_id
+       WHERE p.project_id=$1 AND pu.status<>'deleted' AND p.status<>'deleted'`,
       [req.params.projectId]
     );
     const vendorQ = await pool.query(
@@ -68,11 +96,12 @@ router.get('/summary', authenticate, async (req, res) => {
 
     const salariesTotal = parseFloat(salaryQ.rows[0].total) || 0;
     const pettyCashTotal = parseFloat(pettyQ.rows[0].total) || 0;
+    const pettyCashUtilized = parseFloat(pettyUtilQ.rows[0].total) || 0;
     const vendorPaymentsTotal = parseFloat(vendorQ.rows[0].total) || 0;
     const amountReceivedTotal = parseFloat(receivedQ.rows[0].total) || 0;
 
     const vendorIncluded = isFull;
-    const actualCost = salariesTotal + pettyCashTotal + (vendorIncluded ? vendorPaymentsTotal : 0);
+    const actualCost = salariesTotal + pettyCashUtilized + (vendorIncluded ? vendorPaymentsTotal : 0);
     const projectCostValue = parseFloat(project.project_cost_value) || 0;
     const balanceReceived = amountReceivedTotal - actualCost;
     const profitLoss = projectCostValue - actualCost;
@@ -87,6 +116,9 @@ router.get('/summary', authenticate, async (req, res) => {
       percent_utilized: Math.round(percentUtilized * 100) / 100,
       salaries_total: salariesTotal,
       petty_cash_total: pettyCashTotal,
+      petty_cash_utilized_total: pettyCashUtilized,
+      petty_cash_remaining: Math.max(0, Math.round((pettyCashTotal - pettyCashUtilized) * 100) / 100),
+      petty_cash_utilization_rate: pettyCashTotal > 0 ? Math.round((pettyCashUtilized / pettyCashTotal) * 10000) / 100 : 0,
     };
     if (vendorIncluded) payload.vendor_payments_total = vendorPaymentsTotal;
 
@@ -100,6 +132,7 @@ router.get('/salaries', authenticate, async (req, res) => {
   try {
     if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
       return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
     const { rows } = await pool.query(
       `SELECT s.*, u.full_name as created_by_name
        FROM salaries s LEFT JOIN users u ON s.created_by = u.id
@@ -156,13 +189,27 @@ router.get('/petty-cash', authenticate, async (req, res) => {
   try {
     if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
       return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
     const { rows } = await pool.query(
-      `SELECT p.*, u.full_name as created_by_name
-       FROM petty_cash p LEFT JOIN users u ON p.created_by = u.id
+      `SELECT p.*, u.full_name as created_by_name,
+              COALESCE(ut.used, 0)::float as utilized,
+              COALESCE(p.amount, 0) - COALESCE(ut.used, 0) as remaining
+       FROM petty_cash p
+       LEFT JOIN users u ON p.created_by = u.id
+       LEFT JOIN (
+         SELECT petty_cash_id, SUM(amount)::float AS used
+         FROM petty_cash_utilization WHERE status <> 'deleted'
+         GROUP BY petty_cash_id
+       ) ut ON ut.petty_cash_id = p.id
        WHERE p.project_id=$1 ORDER BY p.week_of DESC, p.created_at DESC`,
       [req.params.projectId]
     );
-    res.json(rows);
+    res.json(rows.map(r => ({
+      ...r,
+      utilized: parseFloat(r.utilized) || 0,
+      remaining: Math.max(0, Math.round((parseFloat(r.amount) - (parseFloat(r.utilized) || 0)) * 100) / 100),
+      utilization_rate: parseFloat(r.amount) > 0 ? Math.round((parseFloat(r.utilized) / parseFloat(r.amount)) * 10000) / 100 : 0,
+    })));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -196,6 +243,145 @@ router.post('/petty-cash', authenticate, authorize('owner', 'admin', 'finance'),
       await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash', rows[0].id,
         `Created petty cash record: ${description} - PKR ${amt} on ${project.name}`);
       await addActivity(req.user.full_name, 'created', `Added petty cash: ${description} on project: ${project.name}`, 'petty_cash', rows[0].id);
+      res.status(201).json(rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ============ PETTY CASH UTILIZATION (partial-spend breakdown) ============
+// RBAC mirrors petty cash: view = Owner/Admin/Finance/PM; add = Owner/Admin/Finance.
+// Deletion reuses the existing Admin->Owner two-step deletion_requests flow
+// (transaction_type='petty_cash_utilization').
+
+// Project-wide utilization breakdown with filters: ?category= &from= &to=
+router.get('/petty-cash/utilizations', authenticate, async (req, res) => {
+  try {
+    if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
+    const { category, from, to } = req.query;
+    let sql = `SELECT pu.*, u.full_name as created_by_name,
+                      p.id as petty_cash_id, p.description as petty_cash_description,
+                      p.amount as petty_cash_amount, p.status as petty_cash_status, p.week_of
+               FROM petty_cash_utilization pu
+               LEFT JOIN users u ON pu.created_by = u.id
+               JOIN petty_cash p ON p.id = pu.petty_cash_id
+               WHERE p.project_id=$1`;
+    const params = [req.params.projectId];
+    let idx = 2;
+    if (category) { sql += ` AND pu.category = $${idx}`; params.push(category); idx++; }
+    if (from) { sql += ` AND pu.utilization_date >= $${idx}`; params.push(from); idx++; }
+    if (to) { sql += ` AND pu.utilization_date <= $${idx}`; params.push(to); idx++; }
+    sql += ' ORDER BY pu.utilization_date DESC, pu.created_at DESC';
+    const { rows } = await pool.query(sql, params);
+
+    // Running balance per disbursement (chronological), matching the ledger style
+    const byDisbursement = {};
+    rows.forEach(r => {
+      if (!byDisbursement[r.petty_cash_id] && r.status !== 'deleted') byDisbursement[r.petty_cash_id] = 0;
+    });
+    const balanced = rows.slice().sort((a, b) =>
+      (a.utilization_date + a.created_at).localeCompare(b.utilization_date + b.created_at));
+    balanced.forEach(r => {
+      if (r.status === 'deleted') { r.running_remaining = null; return; }
+      const used = (byDisbursement[r.petty_cash_id] || 0) + (parseFloat(r.amount) || 0);
+      byDisbursement[r.petty_cash_id] = used;
+      const remaining = Math.round((parseFloat(r.petty_cash_amount) - used) * 100) / 100;
+      r.running_remaining = Math.max(0, remaining);
+    });
+
+    res.json({
+      total_utilized: Math.round(rows.filter(r => r.status !== 'deleted').reduce((s, r) => s + (parseFloat(r.amount) || 0), 0) * 100) / 100,
+      count: rows.length,
+      entries: rows,
+    });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Utilization entries for a single disbursement (with running balance)
+router.get('/petty-cash/:id/utilizations', authenticate, async (req, res) => {
+  try {
+    if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
+    const { rows: pc } = await pool.query(
+      'SELECT * FROM petty_cash WHERE id=$1 AND project_id=$2',
+      [req.params.id, req.params.projectId]
+    );
+    if (pc.length === 0) return res.status(404).json({ error: 'Petty cash entry not found' });
+
+    const { rows } = await pool.query(
+      `SELECT pu.*, u.full_name as created_by_name
+       FROM petty_cash_utilization pu LEFT JOIN users u ON pu.created_by = u.id
+       WHERE pu.petty_cash_id=$1 ORDER BY pu.utilization_date ASC, pu.created_at ASC`,
+      [req.params.id]
+    );
+
+    let used = 0;
+    const entries = rows.map(r => {
+      if (r.status === 'deleted') return { ...r, running_remaining: null };
+      used = Math.round((used + parseFloat(r.amount)) * 100) / 100;
+      return { ...r, running_remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) };
+    });
+
+    res.json({
+      petty_cash: { ...pc[0], utilized: used, remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) },
+      entries,
+      total_utilized: used,
+    });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Add a utilization entry — locked rows prevent a concurrent add from
+// overspending the disbursement (race-condition safe).
+router.post('/petty-cash/:id/utilizations', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
+  try {
+const { utilization_date, date, category, amount, note, receipt_ref } = req.body;
+    const useDate = utilization_date || date;
+    if (!useDate) return res.status(400).json({ error: 'Utilization date required' });
+    if (!category || !String(category).trim()) return res.status(400).json({ error: 'Category required' });
+    const amt = parseAmount(amount);
+    if (amt === null || amt === 0) return res.status(400).json({ error: 'Valid amount (> 0) required' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: pc } = await client.query(
+        'SELECT * FROM petty_cash WHERE id=$1 AND project_id=$2 FOR UPDATE',
+        [req.params.id, req.params.projectId]
+      );
+      if (pc.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Petty cash entry not found' });
+      }
+      if (pc[0].status !== 'active')
+        return res.status(400).json({ error: 'Cannot add utilization while the disbursement is not active (pending deletion/deleted)' });
+
+      const { rows: usedRows } = await client.query(
+        `SELECT COALESCE(SUM(amount), 0)::float AS used FROM petty_cash_utilization
+         WHERE petty_cash_id=$1 AND status<>'deleted'`,
+        [req.params.id]
+      );
+      const used = parseFloat(usedRows[0].used) || 0;
+      const disbursed = parseFloat(pc[0].amount) || 0;
+      if (used + amt > disbursed + 0.0001)
+        return res.status(400).json({ error: `Utilization exceeds disbursement. Remaining: PKR ${Math.max(0, Math.round((disbursed - used) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}` });
+
+const { rows } = await client.query(
+        `INSERT INTO petty_cash_utilization (petty_cash_id, utilization_date, category, amount, note, receipt_ref, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [req.params.id, useDate, String(category).trim(), amt, note || null, receipt_ref || null, req.user.id]
+      );
+      await client.query('COMMIT');
+      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash_utilization', rows[0].id,
+        `Added utilization PKR ${amt} (${category}) on petty cash: ${pc[0].description}`);
+      await addActivity(req.user.full_name, 'created',
+        `Added utilization PKR ${amt} (${category}) to petty cash: ${pc[0].description}`, 'petty_cash_utilization', rows[0].id);
       res.status(201).json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -250,6 +436,8 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
     }
 
     // PO linkage: 'continuous' payments must reference a PO from the purchase_orders table.
+    // Only FULLY approved POs (Admin -> Owner two-step complete) are payable —
+    // a PO awaiting either approval must stay OUT of vendor payments.
     // 'fixed_otp'/'ipc' payments are never linked to a PO — any PO fields are normalized away.
     let poId = null;
     let poNumber = null;
@@ -257,14 +445,17 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
     if (payment_type === 'continuous') {
       if (!po_id) return res.status(400).json({ error: 'PO selection required for continuous payments' });
       const poQ = await pool.query(
-        'SELECT id, po_number, total_amount, status FROM purchase_orders WHERE id=$1 AND vendor_id=$2',
+        `SELECT id, po_number, total_amount, status, admin_approval, owner_approval
+         FROM purchase_orders WHERE id=$1 AND vendor_id=$2`,
         [po_id, vendor_id]
       );
       if (poQ.rows.length === 0) return res.status(400).json({ error: 'Selected PO not found for this vendor' });
-      const poStatus = poQ.rows[0].status;
-      if (poStatus === 'cancelled') return res.status(400).json({ error: 'Cannot link payment to a cancelled PO' });
+      const poRow = poQ.rows[0];
+      if (poRow.status === 'cancelled') return res.status(400).json({ error: 'Cannot link payment to a cancelled PO' });
+      if (poRow.status !== 'approved' || poRow.admin_approval !== 'approved' || poRow.owner_approval !== 'approved')
+        return res.status(400).json({ error: 'Only fully approved POs (Admin and Owner) can be linked to continuous payments' });
       poId = po_id;
-      poNumber = poQ.rows[0].po_number;
+      poNumber = poRow.po_number;
       billNo = bill_number || null;
     }
 
@@ -302,6 +493,7 @@ router.get('/amount-received', authenticate, async (req, res) => {
   try {
     if (!FULL_ACCESS.includes(req.user.role) && !PM_ACCESS.includes(req.user.role))
       return res.status(403).json({ error: 'Insufficient permissions' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
     const { rows } = await pool.query(
       `SELECT ar.*, u.full_name as created_by_name
        FROM amount_received ar LEFT JOIN users u ON ar.created_by = u.id
@@ -368,18 +560,41 @@ router.post('/deletion-requests', authenticate, async (req, res) => {
     const canRequest = FULL_ACCESS.includes(req.user.role)
       || (PM_ACCESS.includes(req.user.role) && ['salary', 'petty_cash'].includes(transaction_type));
     if (!canRequest) return res.status(403).json({ error: 'You cannot request deletion of this transaction type' });
+    if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
 
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const table = TX_TABLES[transaction_type];
-    const { rows: tx } = await pool.query(
-      `SELECT * FROM ${table} WHERE id=$1 AND project_id=$2`,
-      [transaction_id, req.params.projectId]
-    );
+    let tx;
+    if (transaction_type === 'petty_cash_utilization') {
+      const { rows } = await pool.query(
+        `SELECT pu.*, p.project_id
+         FROM petty_cash_utilization pu JOIN petty_cash p ON p.id = pu.petty_cash_id
+         WHERE pu.id=$1 AND p.project_id=$2`,
+        [transaction_id, req.params.projectId]
+      );
+      tx = rows;
+    } else {
+      const { rows } = await pool.query(
+        `SELECT * FROM ${table} WHERE id=$1 AND project_id=$2`,
+        [transaction_id, req.params.projectId]
+      );
+      tx = rows;
+    }
     if (tx.length === 0) return res.status(404).json({ error: 'Transaction not found' });
     if (tx[0].status !== 'active')
       return res.status(400).json({ error: 'Only active transactions can be requested for deletion' });
+
+    // A utilization entry under a disbursement that is itself being deleted
+    // cannot be deleted separately — the parent is already locked.
+    if (transaction_type === 'petty_cash_utilization') {
+      const { rows: parent } = await pool.query(
+        'SELECT status FROM petty_cash WHERE id=$1', [tx[0].petty_cash_id]
+      );
+      if (parent.length === 0 || parent[0].status !== 'active')
+        return res.status(400).json({ error: 'The parent petty cash disbursement is not active — utilization cannot be deleted separately' });
+    }
 
     const { rows } = await pool.query(
       `INSERT INTO deletion_requests (transaction_type, transaction_id, project_id, requested_by, reason, snapshot_data)
@@ -483,6 +698,11 @@ async function applyApproval(req, res, level, projectId = undefined) {
     if (dreq[levelKey] !== 'pending')
       return res.status(400).json({ error: `${level === 'admin' ? 'Admin' : 'Owner'} approval already submitted for this request` });
 
+    // Sequential order is enforced server-side: the Owner can only act AFTER
+    // the Admin has approved. An early Owner action is rejected, not queued.
+    if (level === 'owner' && dreq.admin_approval !== 'approved')
+      return res.status(400).json({ error: 'Owner cannot approve before the Admin has approved this request' });
+
     const decision = approve ? 'approved' : 'rejected';
     const newDreq = {
       ...dreq,
@@ -580,14 +800,16 @@ globalRouter.post('/deletion-requests', authenticate, async (req, res) => {
       'SELECT * FROM bank_transactions WHERE id=$1',
       [transaction_id]
     );
-    if (tx.length === 0) return res.status(404).json({ error: 'Transaction not found' });
+if (tx.length === 0) return res.status(404).json({ error: 'Transaction not found' });
     if (tx[0].status !== 'active')
       return res.status(400).json({ error: 'Only active transactions can be requested for deletion' });
+    if (!tx[0].project_id && transaction_type !== 'petty_cash_utilization')
+      return res.status(400).json({ error: 'Transaction does not belong to this project' });
 
     const { rows } = await pool.query(
       `INSERT INTO deletion_requests (transaction_type, transaction_id, project_id, requested_by, reason, snapshot_data)
-       VALUES ($1,$2,NULL,$3,$4,$5) RETURNING *`,
-      [transaction_type, transaction_id, req.user.id, reason || null, JSON.stringify(tx[0])]
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [transaction_type, transaction_id, req.params.projectId, req.user.id, reason || null, JSON.stringify(tx[0])]
     );
     const { rowCount } = await pool.query(
       `UPDATE bank_transactions SET status='deletion_requested' WHERE id=$1 AND status='active'`,

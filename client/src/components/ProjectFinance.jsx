@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Card, CardHeader, CardContent, Button, Modal, Input, Select, EmptyState, Badge, StatCard, LoadingSkeleton } from '../components/ui'
-import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, ShieldX, Info, TrendingUp } from 'lucide-react'
+import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, ShieldX, Info, TrendingUp, ReceiptText } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
@@ -16,6 +16,9 @@ const TX_LABELS = {
   vendor_payment: 'Vendor Payment',
   amount_received: 'Amount Received',
 }
+
+// Petty cash utilization categories (editable dropdown when recording expenses)
+const PC_CATEGORIES = ['Material', 'Labor', 'Transport', 'Misc']
 
 const COLORS = ['#059669', '#f59e0b', '#3b82f6']
 
@@ -38,6 +41,7 @@ export default function ProjectFinance({ projectId, projectName }) {
   const [summary, setSummary] = useState(null)
   const [salaries, setSalaries] = useState([])
   const [pettyCash, setPettyCash] = useState([])
+  const [utilizations, setUtilizations] = useState([])
   const [vendorPayments, setVendorPayments] = useState([])
   const [amountReceived, setAmountReceived] = useState([])
   const [deletionRequests, setDeletionRequests] = useState([])
@@ -47,11 +51,43 @@ export default function ProjectFinance({ projectId, projectName }) {
   const [addModal, setAddModal] = useState(null)
   const [delModal, setDelModal] = useState({ open: false, type: null, id: null, label: '' })
   const [delReason, setDelReason] = useState('')
+  const [utilModal, setUtilModal] = useState({ open: false, pc: null })
+  const [utilForm, setUtilForm] = useState({ petty_cash_id: '', category: 'Material', date: new Date().toISOString().slice(0, 10), amount: '', note: '', receipt_ref: '' })
+  const [utilDetail, setUtilDetail] = useState(null)
+  const [utilFilters, setUtilFilters] = useState({ category: '', from: '', to: '' })
 
   const canManage = CAN_MANAGE.includes(user?.role)
   const canSeeDeletionRequests = CAN_APPROVE.includes(user?.role)
   const canSeeVendors = user?.role !== 'manager'
   const isOwner = user?.role === 'owner'
+
+  const remainingFor = (pc) => Math.max(0, Math.round(((parseFloat(pc.amount) || 0) - (parseFloat(pc.utilized_total) || 0)) * 100) / 100)
+
+  const openUtilDetail = (pc) => {
+    setUtilFilters({ category: '', from: '', to: '' })
+    api.get(`/projects/${projectId}/finance/petty-cash/${pc.id}/utilizations`)
+      .then(({ data }) => setUtilDetail({ pc, entries: data || [] }))
+      .catch(err => { console.error(err); toast.error('Failed to load utilization details'); })
+  }
+
+  const openUtilModal = (pc) => {
+    setUtilForm({ petty_cash_id: pc.id, category: 'Material', date: new Date().toISOString().slice(0, 10), amount: '', note: '', receipt_ref: '' })
+    setUtilModal({ open: true, pc })
+  }
+
+  const submitUtilization = async () => {
+    const amt = parseFloat(utilForm.amount)
+    if (!amt || amt <= 0) return toast.error('Valid amount required')
+    if (!utilForm.date) return toast.error('Date required')
+    try {
+      const { data } = await api.post(`/projects/${projectId}/finance/petty-cash/${utilForm.petty_cash_id}/utilizations`, {
+        category: utilForm.category, date: utilForm.date, amount: amt, note: utilForm.note, receipt_ref: utilForm.receipt_ref,
+      })
+      toast.success(`Expense of ${formatPKR(data.amount)} recorded`)
+      setUtilModal({ open: false, pc: null })
+      load()
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record expense') }
+  }
 
 const load = useCallback(() => {
     setLoading(true)
@@ -60,6 +96,7 @@ const load = useCallback(() => {
       api.get(`${base}/summary`),
       api.get(`${base}/salaries`),
       api.get(`${base}/petty-cash`),
+      api.get(`${base}/petty-cash/utilizations`),
       api.get(`${base}/amount-received`),
     ]
     if (canSeeVendors) promises.push(api.get(`${base}/vendor-payments`))
@@ -71,6 +108,7 @@ const load = useCallback(() => {
       setSummary(results[i++].data)
       setSalaries(results[i++].data || [])
       setPettyCash(results[i++].data || [])
+      setUtilizations(results[i++].data || [])
       setAmountReceived(results[i++].data || [])
       if (canSeeVendors) setVendorPayments(results[i++].data || [])
       if (canSeeDeletionRequests) setDeletionRequests(results[i++].data || [])
@@ -118,7 +156,7 @@ const load = useCallback(() => {
 
   const chartData = summary ? [
     { name: 'Salaries', value: Math.round(parseFloat(summary.salaries_total) || 0) },
-    { name: 'Petty Cash', value: Math.round(parseFloat(summary.petty_cash_total) || 0) },
+    { name: 'Petty Cash', value: Math.round(parseFloat(summary.petty_cash_utilized_total) || 0) },
     ...(canSeeVendors ? [{ name: 'Vendor Payments', value: Math.round(parseFloat(summary.vendor_payments_total) || 0) }] : []),
   ].filter(d => d.value > 0) : []
 
@@ -230,27 +268,53 @@ const load = useCallback(() => {
               {pettyCash.length === 0 ? (
                 <EmptyState icon={Wallet} title="No petty cash entries" text="Petty cash expenses for this project will appear here" />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 border-b border-slate-200"><tr>
-                      {['Description', 'Amount', 'Week Of', 'Status', 'Added By', 'Actions'].map(h => (
-                        <th key={h} className={`text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider ${h === 'Amount' ? 'text-right' : ''}`}>{h}</th>
-                      ))}
-                    </tr></thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {pettyCash.map(p => (
-                        <tr key={p.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5 font-medium">{p.description}</td>
-                          <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{fmtDate(p.week_of)}</td>
-                          <td className="px-4 py-2.5">{txStatusBadge(p.status)}</td>
-                          <td className="px-4 py-2.5 text-slate-500">{p.created_by_name || '-'}</td>
-                          <td className="px-4 py-2.5">{deleteAction('petty_cash', p)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div className="grid grid-cols-3 gap-3 px-4 py-3 border-b border-slate-100">
+                    <div className="rounded-lg bg-slate-50 px-3 py-2">
+                      <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Disbursed</div>
+                      <div className="text-sm font-bold">{formatPKR(summary?.petty_cash_total)}</div>
+                    </div>
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                      <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Utilized</div>
+                      <div className="text-sm font-bold text-emerald-700">{formatPKR(summary?.petty_cash_utilized_total)}</div>
+                    </div>
+                    <div className="rounded-lg bg-amber-50 px-3 py-2">
+                      <div className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Remaining</div>
+                      <div className="text-sm font-bold text-amber-700">{formatPKR(summary?.petty_cash_remaining)}</div>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b border-slate-200"><tr>
+                        {['Description', 'Disbursed', 'Utilized', 'Remaining', 'Week Of', 'Status', 'Added By', 'Actions'].map(h => (
+                          <th key={h} className={`text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider ${['Disbursed', 'Utilized', 'Remaining'].includes(h) ? 'text-right' : ''}`}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {pettyCash.map(p => (
+                          <tr key={p.id} className="hover:bg-slate-50">
+                            <td className="px-4 py-2.5 font-medium">{p.description}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
+                            <td className="px-4 py-2.5 text-right text-emerald-700">{formatPKR(p.utilized_total)}</td>
+                            <td className="px-4 py-2.5 text-right text-amber-700">{formatPKR(remainingFor(p))}</td>
+                            <td className="px-4 py-2.5 text-slate-500">{fmtDate(p.week_of)}</td>
+                            <td className="px-4 py-2.5">{txStatusBadge(p.status)}</td>
+                            <td className="px-4 py-2.5 text-slate-500">{p.created_by_name || '-'}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="flex gap-1">
+                                <button onClick={() => openUtilDetail(p)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="Expense breakdown"><ReceiptText size={15} /></button>
+                                {canManage && remainingFor(p) > 0 && (
+                                  <button onClick={() => openUtilModal(p)} className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="Record Expense"><Plus size={15} /></button>
+                                )}
+                                {deleteAction('petty_cash', p)}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -409,6 +473,67 @@ const load = useCallback(() => {
         <AmountReceivedForm banks={banks} onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
       </Modal>
 
+      {/* Record petty cash expense (utilization) */}
+      <Modal isOpen={utilModal.open} onClose={() => setUtilModal({ open: false, pc: null })} title="Record Petty Cash Expense" size="max-w-md">
+        <div className="space-y-4">
+          {utilModal.pc && (
+            <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+              Expense against <b>{utilModal.pc.description}</b> · Remaining: <b>{formatPKR(remainingFor(utilModal.pc))}</b>
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="Category *" value={utilForm.category} onChange={e => setUtilForm({ ...utilForm, category: e.target.value })}>
+              {PC_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <Input label="Date *" type="date" value={utilForm.date} onChange={e => setUtilForm({ ...utilForm, date: e.target.value })} />
+          </div>
+          <Input label="Amount (PKR) *" type="number" min="0" step="0.01" value={utilForm.amount} onChange={e => setUtilForm({ ...utilForm, amount: e.target.value })} />
+          <Input label="Note" value={utilForm.note} onChange={e => setUtilForm({ ...utilForm, note: e.target.value })} placeholder="What was this expense for?" />
+          <Input label="Receipt Reference" value={utilForm.receipt_ref} onChange={e => setUtilForm({ ...utilForm, receipt_ref: e.target.value })} placeholder="Optional bill / voucher no." />
+          <div className="flex gap-3">
+            <Button onClick={submitUtilization}>Record Expense</Button>
+            <Button variant="secondary" onClick={() => setUtilModal({ open: false, pc: null })}>Cancel</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Petty cash utilization breakdown */}
+      <Modal isOpen={!!utilDetail} onClose={() => setUtilDetail(null)} title={`Petty Cash Expenses: ${utilDetail?.pc?.description || ''}`} size="max-w-3xl">
+        {utilDetail && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg bg-slate-50 px-3 py-2">
+                <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Disbursed</div>
+                <div className="text-sm font-bold">{formatPKR(utilDetail.pc.amount)}</div>
+              </div>
+              <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Utilized</div>
+                <div className="text-sm font-bold text-emerald-700">{formatPKR(utilDetail.pc.utilized_total)}</div>
+              </div>
+              <div className="rounded-lg bg-amber-50 px-3 py-2">
+                <div className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Remaining</div>
+                <div className="text-sm font-bold text-amber-700">{formatPKR(remainingFor(utilDetail.pc))}</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="w-36"><Select value={utilFilters.category} onChange={e => setUtilFilters({ ...utilFilters, category: e.target.value })}>
+                <option value="">All Categories</option>
+                {PC_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select></div>
+              <div className="w-44"><Input type="date" value={utilFilters.from} onChange={e => setUtilFilters({ ...utilFilters, from: e.target.value })} placeholder="From" /></div>
+              <div className="w-44"><Input type="date" value={utilFilters.to} onChange={e => setUtilFilters({ ...utilFilters, to: e.target.value })} placeholder="To" /></div>
+              <div className="flex items-center"><Button size="sm" variant="secondary" onClick={() => setUtilFilters({ category: '', from: '', to: '' })}>Clear</Button></div>
+            </div>
+            <UtilizationTable
+              entries={utilDetail.entries}
+              filters={utilFilters}
+              canRequestDelete={canManage}
+              onDelete={(u) => openDeleteModal('petty_cash_utilization', u.id, `${u.category}: ${u.note || utilDetail.pc.description}`)}
+            />
+          </div>
+        )}
+      </Modal>
+
       {/* Deletion reason modal */}
       <Modal isOpen={delModal.open} onClose={() => setDelModal({ open: false, type: null, id: null, label: '' })} title="Request Deletion" size="max-w-md">
         <div className="space-y-4">
@@ -516,7 +641,8 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
     api.get('/purchase-orders').then(r => setPos(r.data || [])).catch(err => { console.error(err); toast.error('Failed to load purchase orders') })
   }, [])
 
-  const vendorPos = form.vendor_id ? pos.filter(po => po.vendor_id === form.vendor_id && po.status !== 'cancelled') : []
+  // Spec: only fully approved POs appear in the Continuous payment PO dropdown
+  const vendorPos = form.vendor_id ? pos.filter(po => po.vendor_id === form.vendor_id && po.status === 'approved') : []
   const selectedPo = pos.find(po => po.id === form.po_id)
   const isContinuous = form.payment_type === 'continuous'
 
@@ -634,5 +760,56 @@ function AmountReceivedForm({ banks, onSave, onCancel }) {
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
+  )
+}
+
+// Petty cash utilization breakdown with running balances + filters
+function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
+  const filtered = (entries || [])
+    .filter(u => !filters.category || u.category === filters.category)
+    .filter(u => !filters.from || (u.date >= filters.from))
+    .filter(u => !filters.to || (u.date <= filters.to))
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+
+  if (filtered.length === 0) {
+    return <EmptyState icon={Wallet} title="No expenses match" text={entries.length === 0 ? 'No expenses recorded against this disbursement yet' : 'No expenses match the current filters'} />
+  }
+
+  let run = 0
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-600">
+            <tr>
+              {['Date', 'Category', 'Note', 'Receipt', 'Amount', 'Utilized (Running)', 'Status', 'Actions'].map(h => (
+                <th key={h} className={`text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider ${['Amount', 'Utilized (Running)'].includes(h) ? 'text-right' : ''}`}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.map(u => {
+              run = Math.round((run + (parseFloat(u.amount) || 0)) * 100) / 100
+              return (
+                <tr key={u.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-2.5 text-slate-500">{fmtDate(u.date)}</td>
+                  <td className="px-4 py-2.5"><Badge variant="info">{u.category}</Badge></td>
+                  <td className="px-4 py-2.5 max-w-[180px] truncate" title={u.note || ''}>{u.note || '-'}</td>
+                  <td className="px-4 py-2.5 text-slate-500">{u.receipt_ref || '-'}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(u.amount)}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-600">{formatPKR(run)}</td>
+                  <td className="px-4 py-2.5">{txStatusBadge(u.status)}</td>
+                  <td className="px-4 py-2.5">
+                    {canRequestDelete && u.status === 'active' && (
+                      <button onClick={() => onDelete(u)} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Request Deletion"><Trash2 size={15} /></button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
