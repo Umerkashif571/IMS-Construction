@@ -296,9 +296,9 @@ router.get('/petty-cash/utilizations', authenticate, async (req, res) => {
     });
 
     res.json({
-      total_utilized: Math.round(rows.filter(r => r.status !== 'deleted').reduce((s, r) => s + (parseFloat(r.amount) || 0), 0) * 100) / 100,
+total_utilized: Math.round(rows.filter(r => r.status !== 'deleted').reduce((s, r) => s + (parseFloat(r.amount) || 0), 0) * 100) / 100,
       count: rows.length,
-      entries: rows,
+      entries: rows || [],
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -329,9 +329,9 @@ router.get('/petty-cash/:id/utilizations', authenticate, async (req, res) => {
       return { ...r, running_remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) };
     });
 
-    res.json({
+res.json({
       petty_cash: { ...pc[0], utilized: used, remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) },
-      entries,
+      entries: rows || [],
       total_utilized: used,
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

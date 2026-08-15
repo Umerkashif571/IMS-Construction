@@ -6,6 +6,7 @@ import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, Shi
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import ErrorBoundary from './ErrorBoundary'
 
 const CAN_MANAGE = ['owner', 'admin', 'finance']
 const CAN_APPROVE = ['owner', 'admin']
@@ -61,12 +62,13 @@ export default function ProjectFinance({ projectId, projectName }) {
   const canSeeVendors = user?.role !== 'manager'
   const isOwner = user?.role === 'owner'
 
-  const remainingFor = (pc) => Math.max(0, Math.round(((parseFloat(pc.amount) || 0) - (parseFloat(pc.utilized_total) || 0)) * 100) / 100)
+  const utilizedOf = (pc) => parseFloat(pc?.utilized ?? pc?.utilized_total ?? 0) || 0
+  const remainingFor = (pc) => Math.max(0, Math.round(((parseFloat(pc.amount) || 0) - utilizedOf(pc)) * 100) / 100)
 
   const openUtilDetail = (pc) => {
     setUtilFilters({ category: '', from: '', to: '' })
     api.get(`/projects/${projectId}/finance/petty-cash/${pc.id}/utilizations`)
-      .then(({ data }) => setUtilDetail({ pc, entries: data || [] }))
+      .then(({ data }) => setUtilDetail({ pc, entries: data?.entries || [] }))
       .catch(err => { console.error(err); toast.error('Failed to load utilization details'); })
   }
 
@@ -295,7 +297,7 @@ const load = useCallback(() => {
                           <tr key={p.id} className="hover:bg-slate-50">
                             <td className="px-4 py-2.5 font-medium">{p.description}</td>
                             <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
-                            <td className="px-4 py-2.5 text-right text-emerald-700">{formatPKR(p.utilized_total)}</td>
+                            <td className="px-4 py-2.5 text-right text-emerald-700">{formatPKR(p.utilized)}</td>
                             <td className="px-4 py-2.5 text-right text-amber-700">{formatPKR(remainingFor(p))}</td>
                             <td className="px-4 py-2.5 text-slate-500">{fmtDate(p.week_of)}</td>
                             <td className="px-4 py-2.5">{txStatusBadge(p.status)}</td>
@@ -500,6 +502,7 @@ const load = useCallback(() => {
       {/* Petty cash utilization breakdown */}
       <Modal isOpen={!!utilDetail} onClose={() => setUtilDetail(null)} title={`Petty Cash Expenses: ${utilDetail?.pc?.description || ''}`} size="max-w-3xl">
         {utilDetail && (
+          <ErrorBoundary>
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-lg bg-slate-50 px-3 py-2">
@@ -508,7 +511,7 @@ const load = useCallback(() => {
               </div>
               <div className="rounded-lg bg-emerald-50 px-3 py-2">
                 <div className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider">Utilized</div>
-                <div className="text-sm font-bold text-emerald-700">{formatPKR(utilDetail.pc.utilized_total)}</div>
+                <div className="text-sm font-bold text-emerald-700">{formatPKR(utilizedOf(utilDetail.pc))}</div>
               </div>
               <div className="rounded-lg bg-amber-50 px-3 py-2">
                 <div className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Remaining</div>
@@ -531,6 +534,7 @@ const load = useCallback(() => {
               onDelete={(u) => openDeleteModal('petty_cash_utilization', u.id, `${u.category}: ${u.note || utilDetail.pc.description}`)}
             />
           </div>
+          </ErrorBoundary>
         )}
       </Modal>
 
@@ -765,14 +769,15 @@ function AmountReceivedForm({ banks, onSave, onCancel }) {
 
 // Petty cash utilization breakdown with running balances + filters
 function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
-  const filtered = (entries || [])
+  const rows = Array.isArray(entries) ? entries : []
+  const filtered = rows
     .filter(u => !filters.category || u.category === filters.category)
     .filter(u => !filters.from || (u.date >= filters.from))
     .filter(u => !filters.to || (u.date <= filters.to))
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
 
   if (filtered.length === 0) {
-    return <EmptyState icon={Wallet} title="No expenses match" text={entries.length === 0 ? 'No expenses recorded against this disbursement yet' : 'No expenses match the current filters'} />
+    return <EmptyState icon={Wallet} title={rows.length === 0 ? 'No utilization entries yet' : 'No expenses match'} text={rows.length === 0 ? 'Add one to get started' : 'No expenses match the current filters'} />
   }
 
   let run = 0
