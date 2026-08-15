@@ -452,7 +452,7 @@ async function createSchema() {
     `);
     await client.query(`
       ALTER TABLE purchase_orders ADD CONSTRAINT purchase_orders_status_check
-        CHECK (status IN ('draft', 'pending', 'pending_approval', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled'));
+        CHECK (status IN ('pending', 'admin_approved', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled', 'delivered', 'returned'));
     `);
     // Purchase orders default to 'pending' (no draft workflow exists in the app)
     await client.query(`
@@ -473,6 +473,47 @@ async function createSchema() {
           WHERE table_name='material_transactions' AND column_name='po_id'
         ) THEN
           ALTER TABLE material_transactions ADD COLUMN po_id UUID REFERENCES purchase_orders(id);
+        END IF;
+      END $$;
+    `);
+
+    // Purchase order two-step approval workflow (Admin -> Owner) + required site
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='admin_approval') THEN
+          ALTER TABLE purchase_orders ADD COLUMN admin_approval VARCHAR(20) NOT NULL DEFAULT 'pending'
+            CHECK (admin_approval IN ('pending', 'approved', 'rejected'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='admin_approved_by') THEN
+          ALTER TABLE purchase_orders ADD COLUMN admin_approved_by UUID REFERENCES users(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='admin_approved_at') THEN
+          ALTER TABLE purchase_orders ADD COLUMN admin_approved_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='admin_reject_reason') THEN
+          ALTER TABLE purchase_orders ADD COLUMN admin_reject_reason TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='owner_approval') THEN
+          ALTER TABLE purchase_orders ADD COLUMN owner_approval VARCHAR(20) NOT NULL DEFAULT 'pending'
+            CHECK (owner_approval IN ('pending', 'approved', 'rejected'));
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='owner_approved_by') THEN
+          ALTER TABLE purchase_orders ADD COLUMN owner_approved_by UUID REFERENCES users(id);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='owner_approved_at') THEN
+          ALTER TABLE purchase_orders ADD COLUMN owner_approved_at TIMESTAMPTZ;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='owner_reject_reason') THEN
+          ALTER TABLE purchase_orders ADD COLUMN owner_reject_reason TEXT;
+        END IF;
+
+        -- project_id (site) is mandatory; only enforce when no orphans exist
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='purchase_orders' AND column_name='project_id' AND is_nullable='NO'
+        ) AND NOT EXISTS (SELECT 1 FROM purchase_orders WHERE project_id IS NULL) THEN
+          ALTER TABLE purchase_orders ALTER COLUMN project_id SET NOT NULL;
         END IF;
       END $$;
     `);
@@ -655,8 +696,24 @@ async function createSchema() {
           EXECUTE format('ALTER TABLE deletion_requests DROP CONSTRAINT %I', con.conname);
         END LOOP;
         ALTER TABLE deletion_requests ADD CONSTRAINT deletion_requests_transaction_type_check
-          CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received'));
+          CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received', 'petty_cash_utilization'));
       END $$;
+    `);
+
+    // Petty Cash utilization entries (partial-spend ledger on disbursements)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS petty_cash_utilization (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        petty_cash_id UUID NOT NULL REFERENCES petty_cash(id),
+        utilization_date DATE NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        amount DECIMAL(15, 2) NOT NULL CHECK (amount > 0),
+        note TEXT,
+        receipt_ref VARCHAR(255),
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+      )
     `);
 
     // ============ INDEXES (missing FK/status/date indexes) ============
@@ -709,6 +766,10 @@ async function createSchema() {
       CREATE INDEX IF NOT EXISTS idx_amount_received_project_id ON amount_received(project_id);
       CREATE INDEX IF NOT EXISTS idx_amount_received_status ON amount_received(status);
       CREATE INDEX IF NOT EXISTS idx_vendor_payments_po_id ON vendor_payments(po_id);
+      CREATE INDEX IF NOT EXISTS idx_pcu_petty_cash_id ON petty_cash_utilization(petty_cash_id);
+      CREATE INDEX IF NOT EXISTS idx_pcu_category ON petty_cash_utilization(category);
+      CREATE INDEX IF NOT EXISTS idx_pcu_date ON petty_cash_utilization(utilization_date);
+      CREATE INDEX IF NOT EXISTS idx_pcu_status ON petty_cash_utilization(status);
     `);
 
     // ============ CONSTRAINTS (guarded — skip gracefully if existing data would violate) ============

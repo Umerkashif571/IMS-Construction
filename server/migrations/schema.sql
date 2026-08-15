@@ -311,16 +311,25 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   po_number VARCHAR(100) UNIQUE NOT NULL,
   vendor_id UUID REFERENCES vendors(id),
   vendor_name VARCHAR(255),
-  project_id UUID REFERENCES projects(id),
+  project_id UUID REFERENCES projects(id) NOT NULL,
   order_date TIMESTAMPTZ DEFAULT NOW(),
   expected_delivery DATE,
   delivery_status VARCHAR(50) DEFAULT 'pending' CHECK (delivery_status IN ('pending', 'partial', 'delivered', 'cancelled')),
-  status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'ordered', 'received', 'partial_received', 'cancelled', 'completed', 'delivered', 'returned')),
+  status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'admin_approved', 'approved', 'rejected', 'ordered', 'received', 'partial_received', 'cancelled', 'completed', 'delivered', 'returned')),
   total_amount DECIMAL(15,2) DEFAULT 0,
   notes TEXT,
   created_by UUID REFERENCES users(id),
   approved_by UUID REFERENCES users(id),
   received_by VARCHAR(255),
+  -- Two-step sequential approval: Admin first, then Owner.
+  admin_approval VARCHAR(20) DEFAULT 'pending' CHECK (admin_approval IN ('pending', 'approved', 'rejected')),
+  admin_approved_by UUID REFERENCES users(id),
+  admin_approved_at TIMESTAMPTZ,
+  admin_reject_reason TEXT,
+  owner_approval VARCHAR(20) DEFAULT 'pending' CHECK (owner_approval IN ('pending', 'approved', 'rejected')),
+  owner_approved_by UUID REFERENCES users(id),
+  owner_approved_at TIMESTAMPTZ,
+  owner_reject_reason TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -481,7 +490,7 @@ CREATE TABLE IF NOT EXISTS amount_received (
 -- 21.4 DELETION REQUESTS
 CREATE TABLE IF NOT EXISTS deletion_requests (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received')),
+  transaction_type VARCHAR(50) NOT NULL CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received', 'petty_cash_utilization')),
   transaction_id UUID NOT NULL,
   project_id UUID REFERENCES projects(id),
   requested_by UUID REFERENCES users(id),
@@ -495,6 +504,29 @@ CREATE TABLE IF NOT EXISTS deletion_requests (
   final_status VARCHAR(20) DEFAULT 'pending' CHECK (final_status IN ('pending', 'approved', 'rejected')),
   snapshot_data JSONB,
   created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 21.4.1 PETTY CASH UTILIZATION (partial-spend ledger on disbursements)
+CREATE TABLE IF NOT EXISTS petty_cash_utilization (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  petty_cash_id UUID NOT NULL REFERENCES petty_cash(id),
+  utilization_date DATE NOT NULL,
+  category VARCHAR(100) NOT NULL,
+  amount DECIMAL(15, 2) NOT NULL CHECK (amount > 0),
+  note TEXT,
+  receipt_ref VARCHAR(255),
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
+);
+
+-- 21.4.2 PROJECT MANAGERS (project-scoping for the Manager role on finance data)
+CREATE TABLE IF NOT EXISTS project_managers (
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  assigned_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (project_id, user_id)
 );
 
 -- ============================================================
@@ -564,6 +596,11 @@ CREATE INDEX IF NOT EXISTS idx_bank_transactions_date ON bank_transactions(date)
 CREATE INDEX IF NOT EXISTS idx_bank_transactions_status ON bank_transactions(status);
 CREATE INDEX IF NOT EXISTS idx_amount_received_project_id ON amount_received(project_id);
 CREATE INDEX IF NOT EXISTS idx_amount_received_status ON amount_received(status);
+CREATE INDEX IF NOT EXISTS idx_pcu_petty_cash_id ON petty_cash_utilization(petty_cash_id);
+CREATE INDEX IF NOT EXISTS idx_pcu_category ON petty_cash_utilization(category);
+CREATE INDEX IF NOT EXISTS idx_pcu_date ON petty_cash_utilization(utilization_date);
+CREATE INDEX IF NOT EXISTS idx_pcu_status ON petty_cash_utilization(status);
+CREATE INDEX IF NOT EXISTS idx_pm_user ON project_managers(user_id);
 
 -- ============================================================
 -- 23. CONSTRAINTS (guarded — skip if existing data violates)
