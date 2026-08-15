@@ -8,8 +8,11 @@ const router = express.Router();
 
 router.get('/', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
+    const roleFilter = req.query.role ? 'WHERE role = $1' : '';
+    const params = req.query.role ? [req.query.role] : [];
     const { rows } = await pool.query(
-      'SELECT id, email, full_name, role, phone, is_active, created_at FROM users ORDER BY full_name'
+      `SELECT id, email, full_name, role, phone, is_active, created_at FROM users ${roleFilter} ORDER BY full_name`,
+      params
     );
     res.json(rows);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }

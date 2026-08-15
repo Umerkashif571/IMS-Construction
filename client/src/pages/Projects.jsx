@@ -27,6 +27,34 @@ export default function Projects() {
   const [detailTab, setDetailTab] = useState('overview')
 
   const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
+  const canAssignManagers = ['owner', 'admin'].includes(user?.role)
+  const [projectManagers, setProjectManagers] = useState([])
+  const [managerUsers, setManagerUsers] = useState([])
+  const [assignTarget, setAssignTarget] = useState('')
+
+  const loadManagers = (projectId) => {
+    if (!projectId || !canAssignManagers) return
+    api.get(`/projects/${projectId}/managers`).then(({ data }) => setProjectManagers(data || [])).catch(() => setProjectManagers([]))
+    api.get('/users', { params: { role: 'manager' } }).then(({ data }) => setManagerUsers((data || []).filter(u => u.role === 'manager'))).catch(() => setManagerUsers([]))
+  }
+
+  const assignManager = async () => {
+    if (!assignTarget) return toast.error('Select a manager first')
+    try {
+      await api.put(`/projects/${detailModal.project.id}/managers/${assignTarget}`)
+      toast.success('Manager assigned to project')
+      setAssignTarget('')
+      loadManagers(detailModal.project.id)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to assign manager') }
+  }
+
+  const removeManager = async (userId) => {
+    try {
+      await api.delete(`/projects/${detailModal.project.id}/managers/${userId}`)
+      toast.success('Manager removed')
+      loadManagers(detailModal.project.id)
+    } catch (err) { console.error(err); toast.error('Failed to remove manager') }
+  }
 
   const load = (q = '') => {
     setLoading(true)
@@ -53,6 +81,7 @@ export default function Projects() {
     try {
       const [projRes, matCostRes] = await Promise.all([api.get(`/projects/${project.id}`), api.get(`/projects/${project.id}/material-cost`)])
       setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data })
+      loadManagers(project.id)
     } catch (err) { console.error(err); toast.error('Failed to load project details') }
   }
 
@@ -166,6 +195,36 @@ export default function Projects() {
                     <div key={label}><span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{label}</span><span className="text-sm font-semibold text-slate-800">{value || '-'}</span></div>
                   ))}
                 </div>
+                {canAssignManagers && (
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <h3 className="text-sm font-bold text-slate-700 mb-3">Assigned Managers</h3>
+                    <p className="text-[11px] text-slate-500 mb-3">Managers can only view finance data (including the Petty Cash breakdown) for projects they are assigned to.</p>
+                    {projectManagers.length === 0 ? (
+                      <p className="text-xs text-slate-400 mb-3">No managers assigned yet</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {projectManagers.map(m => (
+                          <span key={m.id} className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-full px-3 py-1 text-xs">
+                            {m.full_name || m.email}
+                            <button onClick={() => removeManager(m.id)} className="text-red-500 hover:text-red-700" title="Remove">×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <Select value={assignTarget} onChange={e => setAssignTarget(e.target.value)}>
+                          <option value="">Select manager...</option>
+                          {managerUsers.filter(u => !projectManagers.some(m => m.id === u.id)).map(u => (
+                            <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                          ))}
+                        </Select>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={assignManager}><Plus size={14} /> Assign</Button>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <h3 className="text-sm font-bold text-slate-700 mb-3">Material Cost Breakdown</h3>
                   {detailModal.materials.length === 0 ? (

@@ -191,4 +191,41 @@ router.get('/:id/tools', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ============ PROJECT MANAGERS (PM project-scoping) ============
+// A manager can only view finance data for projects they are assigned to.
+// Assigned by Owner/Admin.
+
+router.get('/:id/managers', authenticate, authorize('owner', 'admin'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.full_name, u.email, u.role
+       FROM project_managers pm JOIN users u ON u.id = pm.user_id
+       WHERE pm.project_id=$1 ORDER BY u.full_name`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+router.put('/:id/managers/:userId', authenticate, authorize('owner', 'admin'), async (req, res) => {
+  try {
+    const { rows: u } = await pool.query('SELECT id, role FROM users WHERE id=$1', [req.params.userId]);
+    if (u.length === 0) return res.status(404).json({ error: 'User not found' });
+    if (u[0].role !== 'manager')
+      return res.status(400).json({ error: 'Only users with the Manager role can be assigned to projects' });
+    await pool.query(
+      'INSERT INTO project_managers (project_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+      [req.params.id, req.params.userId]
+    );
+    res.status(201).json({ ok: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+router.delete('/:id/managers/:userId', authenticate, authorize('owner', 'admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_managers WHERE project_id=$1 AND user_id=$2', [req.params.id, req.params.userId]);
+    res.json({ ok: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;
