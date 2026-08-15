@@ -3,17 +3,22 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
-import { Plus, Search, FileText, PlusCircle, Edit3, Trash2, X, Building2, Printer, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Search, FileText, PlusCircle, Edit3, Trash2, X, Building2, Printer, ChevronRight, CheckCircle, XCircle, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 
 const statusBadge = (s) => {
   const map = {
     active: 'success', inactive: 'default',
-    pending: 'warning', approved: 'info', partial_received: 'purple',
-    received: 'success', cancelled: 'error', completed: 'success'
+    pending: 'warning', admin_approved: 'indigo', approved: 'info', partial_received: 'purple',
+    received: 'success', cancelled: 'error', rejected: 'error', completed: 'success'
   }
   return <Badge variant={map[s] || 'default'}>{s?.replace(/_/g, ' ') || s}</Badge>
+}
+
+const decisionBadge = (d) => {
+  const map = { pending: 'warning', approved: 'success', rejected: 'error' }
+  return <Badge variant={map[d] || 'default'}>{d || 'pending'}</Badge>
 }
 
 export default function Vendors() {
@@ -32,13 +37,19 @@ export default function Vendors() {
   const [poSearch, setPoSearch] = useState('')
   const [poStatusFilter, setPoStatusFilter] = useState('')
   const [createPoModal, setCreatePoModal] = useState({ open: false, vendor: null })
-  const [poForm, setPoForm] = useState({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '' })
+  const [poForm, setPoForm] = useState({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
   const [poDetailModal, setPoDetailModal] = useState({ open: false, po: null })
+  const [rejectModal, setRejectModal] = useState({ open: false, poId: null, level: null })
+  const [rejectReason, setRejectReason] = useState('')
   const [allPos, setAllPos] = useState([])
+  const [projects, setProjects] = useState([])
 
   const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
-  const canApprove = ['owner', 'admin'].includes(user?.role)
   const canSeePayments = ['owner', 'admin', 'finance'].includes(user?.role)
+  // Spec: PO creation is exclusively a Procurement role action.
+  const canCreatePO = user?.role === 'procurement_officer'
+  const isAdmin = user?.role === 'admin'
+  const isOwner = user?.role === 'owner'
 
   const load = (q = '') => {
     setLoading(true)
@@ -113,18 +124,58 @@ export default function Vendors() {
     setPoForm({ ...poForm, items })
   }
 
+  const openCreatePo = (vendor) => {
+    setCreatePoModal({ open: true, vendor })
+    setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
+    api.get('/projects').then(({ data }) => setProjects(data || [])).catch(err => { console.error(err); toast.error('Failed to load sites') })
+  }
+
   const handleCreatePO = async () => {
     if (poForm.items.length === 0 || !poForm.items[0].material_name) return toast.error('At least one item required')
+    if (!poForm.project_id) return toast.error('Site (project) selection is required')
     try {
       const { data } = await api.post(`/vendors/${createPoModal.vendor.id}/purchase-orders`, {
         items: poForm.items.map(it => ({ ...it, quantity: parseFloat(it.quantity) || 0, unit_price: parseFloat(it.unit_price) || 0 })),
-        notes: poForm.notes
+        notes: poForm.notes,
+        project_id: poForm.project_id,
       })
       toast.success(`Purchase order ${data.po_number} created`)
       setCreatePoModal({ open: false, vendor: null })
-      setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '' })
+      setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
       setPoDetailModal({ open: true, po: data })
+      if (poModal.open) setPoModal({ open: false, vendor: null })
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create PO') }
+  }
+
+  // Sequential approval: Admin decides first, Owner decides last.
+  const handlePoDecision = async (poId, level, approve) => {
+    if (!approve) {
+      setRejectReason('')
+      setRejectModal({ open: true, poId, level })
+      return
+    }
+    try {
+      const { data } = await api.put(`/purchase-orders/${poId}/${level}-approve`, { approve: true })
+      toast.success(level === 'admin' ? 'PO approved by Admin — awaiting Owner' : 'PO fully approved')
+      if (poDetailModal.open) setPoDetailModal({ ...poDetailModal, po: data })
+      if (poModal.open) {
+        setPos(prev => prev.map(p => p.id === poId ? { ...p, ...data } : p))
+      }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to update PO') }
+  }
+
+  const submitPoRejection = async () => {
+    if (!rejectReason.trim()) return toast.error('A rejection reason is required')
+    try {
+      const { data } = await api.put(`/purchase-orders/${rejectModal.poId}/${rejectModal.level}-approve`, { approve: false, reason: rejectReason.trim() })
+      toast.success('PO rejected — reason recorded for the creator')
+      setRejectModal({ open: false, poId: null, level: null })
+      setRejectReason('')
+      if (poDetailModal.open) setPoDetailModal({ ...poDetailModal, po: data })
+      if (poModal.open) {
+        setPos(prev => prev.map(p => p.id === rejectModal.poId ? { ...p, ...data } : p))
+      }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to reject PO') }
   }
 
   const printPO = () => {
@@ -205,9 +256,12 @@ export default function Vendors() {
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
                         <button onClick={() => viewPOs(v)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="Purchase Orders"><FileText size={16} /></button>
+                        {/* Spec: PO creation is exclusively a Procurement role action. */}
+                        {canCreatePO && (
+                          <button onClick={() => openCreatePo(v)} className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="Create PO"><PlusCircle size={16} /></button>
+                        )}
                         {canEdit && (
                           <>
-                            <button onClick={() => setCreatePoModal({ open: true, vendor: v })} className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="Create PO"><PlusCircle size={16} /></button>
                             <button onClick={() => setModal({ open: true, item: v })} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="Edit"><Edit3 size={16} /></button>
                             <button onClick={() => setDeleteConfirm({ open: true, id: v.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600" title="Delete"><Trash2 size={16} /></button>
                           </>
@@ -250,7 +304,7 @@ export default function Vendors() {
             <div className="space-y-4">
               <div className="flex gap-3">
                 <div className="flex-1"><Input placeholder="Search POs..." value={poSearch} onChange={e => setPoSearch(e.target.value)} /></div>
-                <div className="w-40"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
+                <div className="w-48"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="admin_approved">Admin Approved</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
               </div>
               {filteredPos.length === 0 ? (
                 <EmptyState icon={FileText} title="No purchase orders" text="No POs found for this vendor" />
@@ -279,8 +333,12 @@ export default function Vendors() {
       </Modal>
 
       {/* Create PO Modal */}
-      <Modal isOpen={createPoModal.open} onClose={() => { setCreatePoModal({ open: false, vendor: null }); setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '' }) }} title={`Create PO: ${createPoModal.vendor?.name}`} size="max-w-lg">
+      <Modal isOpen={createPoModal.open} onClose={() => { setCreatePoModal({ open: false, vendor: null }); setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' }) }} title={`Create PO: ${createPoModal.vendor?.name}`} size="max-w-lg">
         <div className="space-y-4">
+          <Select label="Site (Project) *" value={poForm.project_id} onChange={e => setPoForm({ ...poForm, project_id: e.target.value })}>
+            <option value="">Select site...</option>
+            {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
           {poForm.items.map((item, idx) => (
             <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-3">
               <div className="flex items-center justify-between">
@@ -307,18 +365,42 @@ export default function Vendors() {
       <Modal isOpen={poDetailModal.open} onClose={() => setPoDetailModal({ open: false, po: null })} title={`PO: ${poDetailModal.po?.po_number}`} size="max-w-3xl">
         {poDetailModal.po && (
           <div className="space-y-4">
-            <div className="flex gap-2 justify-end">
-              {poDetailModal.po.status === 'pending' && canApprove && (
-                <Button size="sm" onClick={() => handlePoStatus(poDetailModal.po.id, 'approved')}><CheckCircle size={14} /> Approve</Button>
+            <div className="flex gap-2 justify-end flex-wrap">
+              {/* Sequential approval: Admin stage first, Owner stage last. */}
+              {poDetailModal.po.status === 'pending' && isAdmin && (
+                <>
+                  <Button size="sm" onClick={() => handlePoDecision(poDetailModal.po.id, 'admin', true)}><CheckCircle size={14} /> Approve</Button>
+                  <Button size="sm" variant="destructive" onClick={() => handlePoDecision(poDetailModal.po.id, 'admin', false)}><XCircle size={14} /> Reject</Button>
+                </>
+              )}
+              {poDetailModal.po.status === 'admin_approved' && isOwner && (
+                <>
+                  <Button size="sm" onClick={() => handlePoDecision(poDetailModal.po.id, 'owner', true)}><CheckCircle size={14} /> Final Approve</Button>
+                  <Button size="sm" variant="destructive" onClick={() => handlePoDecision(poDetailModal.po.id, 'owner', false)}><XCircle size={14} /> Reject</Button>
+                </>
               )}
               {poDetailModal.po.status === 'approved' && canEdit && (
                 <Button size="sm" variant="secondary" onClick={() => handlePoStatus(poDetailModal.po.id, 'received')}><CheckCircle size={14} /> Mark Received</Button>
               )}
-              {['pending', 'approved'].includes(poDetailModal.po.status) && canEdit && (
+              {['pending', 'admin_approved', 'approved'].includes(poDetailModal.po.status) && canEdit && (
                 <Button size="sm" variant="destructive" onClick={() => handlePoStatus(poDetailModal.po.id, 'cancelled')}><XCircle size={14} /> Cancel</Button>
               )}
               <Button size="sm" variant="secondary" onClick={printPO}><Printer size={14} /> Print</Button>
             </div>
+            {/* Approval chain progress */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">Approval:</span>
+              <span className="flex items-center gap-1"><Badge variant={poDetailModal.po.admin_approval === 'approved' ? 'success' : poDetailModal.po.admin_approval === 'rejected' ? 'error' : 'warning'}>Admin: {poDetailModal.po.admin_approval || 'pending'}</Badge></span>
+              <ArrowRight size={12} className="text-gray-400" />
+              <span className="flex items-center gap-1"><Badge variant={poDetailModal.po.owner_approval === 'approved' ? 'success' : poDetailModal.po.owner_approval === 'rejected' ? 'error' : 'warning'}>Owner: {poDetailModal.po.owner_approval || 'pending'}</Badge></span>
+              <span className="flex items-center gap-1">{statusBadge(poDetailModal.po.status)}</span>
+            </div>
+            {(poDetailModal.po.admin_reject_reason || poDetailModal.po.owner_reject_reason) && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {poDetailModal.po.admin_reject_reason && <p><b>Admin rejection:</b> {poDetailModal.po.admin_reject_reason}</p>}
+                {poDetailModal.po.owner_reject_reason && <p><b>Owner rejection:</b> {poDetailModal.po.owner_reject_reason}</p>}
+              </div>
+            )}
             <div id="po-document" className="bg-white border border-gray-200 rounded-xl p-8 text-sm">
               <div className="text-center border-b-2 border-gray-900 pb-5 mb-6">
                 <h1 className="text-xl font-bold uppercase tracking-widest">Purchase Order</h1>
@@ -336,7 +418,8 @@ export default function Vendors() {
                 <div className="text-right">
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-1">Order Details</h3>
                   <p className="text-xs text-gray-600">Date: {poDetailModal.po.created_at ? new Date(poDetailModal.po.created_at).toLocaleDateString() : '-'}</p>
-                  <p className="text-xs text-gray-600">Status: {poDetailModal.po.status}</p>
+                  <p className="text-xs text-gray-600">Status: {poDetailModal.po.status?.replace(/_/g, ' ')}</p>
+                  {poDetailModal.po.project_name && <p className="text-xs text-gray-600">Site: {poDetailModal.po.project_name}</p>}
                   {poDetailModal.po.received_by && <p className="text-xs text-gray-600">Received by: {poDetailModal.po.received_by}</p>}
                   {poDetailModal.po.notes && <p className="text-xs text-gray-600 mt-2 italic">{poDetailModal.po.notes}</p>}
                 </div>
@@ -376,6 +459,17 @@ export default function Vendors() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* PO Rejection reason modal */}
+      <Modal isOpen={rejectModal.open} onClose={() => setRejectModal({ open: false, poId: null, level: null })} title={`Reject PO (${rejectModal.level === 'admin' ? 'Admin' : 'Owner'} stage)`} size="max-w-md">
+        <div className="space-y-4">
+          <Input value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Rejection reason * (shown to the creator)" />
+          <div className="flex gap-3">
+            <Button variant="destructive" onClick={submitPoRejection}>Confirm Rejection</Button>
+            <Button variant="secondary" onClick={() => setRejectModal({ open: false, poId: null, level: null })}>Cancel</Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
