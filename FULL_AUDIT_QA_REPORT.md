@@ -34,7 +34,7 @@
 | `server/scripts/audit-qa-suite.js` | repo (committed) | deployed prod, arg2 = origin, arg3 = QA password |
 | `server/scripts/e2e-flow-check.js` | repo (committed) | deployed prod, prints the full-chain timeline |
 
-QA password for seeded demo users was rotated in the DB to `Qa!Set2026x9` (the value inside `server/.env` is the *seed-time* password and no longer matches — the suite takes the live password as an argument).
+Demo accounts all share one consistent password: **`Demo@12345`** (rotated 2026-08-15; supersedes the earlier `Qa!Set2026x9`). The value inside `server/.env` is the *seed-time* password and no longer matches — QA harnesses take the live password as an argument.
 
 ---
 
@@ -74,7 +74,7 @@ Key assertions, all green:
 
 - `server/migrations/2026-08-15_po_workflow_petty_cash_utilization.sql` applied to Supabase and verified: `project_id` backfilled, `NOT NULL` set (0 NULL rows), status CHECK extended, `petty_cash_utilization` + `project_managers` + index exist, `deletion_requests.project_id` nullable for utilization requests. PO status distribution: approved=3, ordered=1, pending=12, received=3.
 - All QA fixtures from this session (9 projects, 6 vendors, 22 QA users, their bank transactions) **deleted** — demo DB clean, zero leftovers.
-- Demo passwords rotated: **`Qa!Set2026x9`** for all seeded demo accounts (admin@ims.com, owner@ims.com, procurement@ims.com, finance@ims.com, pm@ims.com).
+- All 11 demo accounts use one consistent password: **`Demo@12345`** (rotated 2026-08-15; supersedes `Qa!Set2026x9`). Includes admin@ims.com, owner@ims.com, procurement@ims.com, finance@ims.com, manager@ims.com, store@ims.com, engineer@ims.com, staff@ims.com, plus test accounts owner2-*, po-*, deact-*.
 
 ## 8. Notes / follow-ups
 

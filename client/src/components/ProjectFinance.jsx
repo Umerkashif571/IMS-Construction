@@ -6,6 +6,7 @@ import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, Shi
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import { d, add, sub, mul, div, round2, toNumber, gt, gte } from '../utils/decimal'
 import ErrorBoundary from './ErrorBoundary'
 
 const CAN_MANAGE = ['owner', 'admin', 'finance']
@@ -62,8 +63,8 @@ export default function ProjectFinance({ projectId, projectName }) {
   const canSeeVendors = user?.role !== 'manager'
   const isOwner = user?.role === 'owner'
 
-  const utilizedOf = (pc) => parseFloat(pc?.utilized ?? pc?.utilized_total ?? 0) || 0
-  const remainingFor = (pc) => Math.max(0, Math.round(((parseFloat(pc.amount) || 0) - utilizedOf(pc)) * 100) / 100)
+  const utilizedOf = (pc) => toNumber(d(pc?.utilized ?? pc?.utilized_total ?? 0))
+  const remainingFor = (pc) => toNumber(round2(sub(d(pc.amount), d(utilizedOf(pc)))))
 
   const openUtilDetail = (pc) => {
     setUtilFilters({ category: '', from: '', to: '' })
@@ -652,11 +653,11 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
 
   // Outstanding balance for the selected PO (PO total minus already paid, for partial payments)
   const poOutstanding = (po) => {
-    const total = parseFloat(po?.total_amount) || 0
+    const total = d(po?.total_amount)
     const paid = (vendorPayments || [])
       .filter(vp => vp.po_id === po?.id && vp.status !== 'deleted')
-      .reduce((s, vp) => s + (parseFloat(vp.amount) || 0), 0)
-    return Math.max(0, Math.round((total - paid) * 100) / 100)
+      .reduce((s, vp) => add(d(s), d(vp.amount)), d(0))
+    return toNumber(round2(sub(total, paid)))
   }
 
   const handlePoSelect = (e) => {
@@ -780,7 +781,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
     return <EmptyState icon={Wallet} title={rows.length === 0 ? 'No utilization entries yet' : 'No expenses match'} text={rows.length === 0 ? 'Add one to get started' : 'No expenses match the current filters'} />
   }
 
-  let run = 0
+  let run = d(0)
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -794,7 +795,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.map(u => {
-              run = Math.round((run + (parseFloat(u.amount) || 0)) * 100) / 100
+              run = round2(add(run, d(u.amount)))
               return (
                 <tr key={u.id} className="hover:bg-slate-50">
                   <td className="px-4 py-2.5 text-slate-500">{fmtDate(u.date)}</td>
@@ -802,7 +803,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
                   <td className="px-4 py-2.5 max-w-[180px] truncate" title={u.note || ''}>{u.note || '-'}</td>
                   <td className="px-4 py-2.5 text-slate-500">{u.receipt_ref || '-'}</td>
                   <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(u.amount)}</td>
-                  <td className="px-4 py-2.5 text-right text-slate-600">{formatPKR(run)}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-600">{formatPKR(toNumber(run))}</td>
                   <td className="px-4 py-2.5">{txStatusBadge(u.status)}</td>
                   <td className="px-4 py-2.5">
                     {canRequestDelete && u.status === 'active' && (

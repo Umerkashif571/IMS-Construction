@@ -1,6 +1,4 @@
-const pool = require('./pool');
-
-async function createSchema() {
+async function createSchema(pool = require('./pool')) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

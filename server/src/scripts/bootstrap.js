@@ -9,7 +9,7 @@ const { seedDatabase } = require('../db/seed');
 
 (async () => {
   try {
-    await createSchema();
+    await createSchema(pool);
   } catch (e) {
     console.error('Schema creation failed:', e.message, e.stack);
     process.exit(1);

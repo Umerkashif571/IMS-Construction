@@ -4,6 +4,7 @@ import { Card, CardHeader, CardContent, Button, Modal, Input, EmptyState, Badge,
 import { Landmark, Plus, Trash2, ArrowDownLeft, ArrowUpRight, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import { d, add, toNumber } from '../utils/decimal'
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' }) : '-')
 
@@ -59,8 +60,8 @@ export default function BankBook() {
 
   const totals = ledger.reduce((acc, t) =>
   t.status === 'deleted' ? acc : ({
-    in: acc.in + (parseFloat(t.amount_in) || 0),
-    out: acc.out + (parseFloat(t.amount_out) || 0),
+    in: toNumber(add(d(acc.in), d(t.amount_in))),
+    out: toNumber(add(d(acc.out), d(t.amount_out))),
   }), { in: 0, out: 0 })
 
   const submitDeletion = async () => {

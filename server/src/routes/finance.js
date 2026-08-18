@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, addActivity, notifyRoles, createNotification } = require('../db/helpers');
+const { d, add, sub, mul, div, round2, toNumber, gt, gte } = require('../utils/decimal');
 
 const router = express.Router({ mergeParams: true });
 
@@ -36,8 +37,8 @@ async function projectExists(res, projectId) {
 }
 
 function parseAmount(v) {
-  const n = parseFloat(v);
-  return isNaN(n) || n < 0 ? null : n;
+  const dec = d(v);
+  return dec.isNaN() || dec.lt(0) ? null : dec;
 }
 
 // Part 3: project-scoping for PM — a manager may only access finance data for
@@ -94,18 +95,18 @@ const isFull = FULL_ACCESS.includes(req.user.role);
       [req.params.projectId]
     );
 
-    const salariesTotal = parseFloat(salaryQ.rows[0].total) || 0;
-    const pettyCashTotal = parseFloat(pettyQ.rows[0].total) || 0;
-    const pettyCashUtilized = parseFloat(pettyUtilQ.rows[0].total) || 0;
-    const vendorPaymentsTotal = parseFloat(vendorQ.rows[0].total) || 0;
-    const amountReceivedTotal = parseFloat(receivedQ.rows[0].total) || 0;
+const salariesTotal = toNumber(d(salaryQ.rows[0].total));
+    const pettyCashTotal = toNumber(d(pettyQ.rows[0].total));
+    const pettyCashUtilized = toNumber(d(pettyUtilQ.rows[0].total));
+    const vendorPaymentsTotal = toNumber(d(vendorQ.rows[0].total));
+    const amountReceivedTotal = toNumber(d(receivedQ.rows[0].total));
 
     const vendorIncluded = isFull;
-    const actualCost = salariesTotal + pettyCashUtilized + (vendorIncluded ? vendorPaymentsTotal : 0);
-    const projectCostValue = parseFloat(project.project_cost_value) || 0;
-    const balanceReceived = amountReceivedTotal - actualCost;
-    const profitLoss = projectCostValue - actualCost;
-    const percentUtilized = projectCostValue > 0 ? (actualCost / projectCostValue) * 100 : 0;
+    const actualCost = toNumber(add(add(d(salariesTotal), d(pettyCashUtilized)), vendorIncluded ? d(vendorPaymentsTotal) : d(0)));
+    const projectCostValue = toNumber(d(project.project_cost_value));
+    const balanceReceived = toNumber(sub(d(amountReceivedTotal), d(actualCost)));
+    const profitLoss = toNumber(sub(d(projectCostValue), d(actualCost)));
+    const percentUtilized = projectCostValue > 0 ? toNumber(mul(div(d(actualCost), d(projectCostValue)), d(100))) : 0;
 
     const payload = {
       project_cost_value: projectCostValue,
@@ -113,12 +114,12 @@ const isFull = FULL_ACCESS.includes(req.user.role);
       balance_received: balanceReceived,
       profit_loss: profitLoss,
       amount_received_total: amountReceivedTotal,
-      percent_utilized: Math.round(percentUtilized * 100) / 100,
+      percent_utilized: toNumber(round2(d(percentUtilized))),
       salaries_total: salariesTotal,
       petty_cash_total: pettyCashTotal,
       petty_cash_utilized_total: pettyCashUtilized,
-      petty_cash_remaining: Math.max(0, Math.round((pettyCashTotal - pettyCashUtilized) * 100) / 100),
-      petty_cash_utilization_rate: pettyCashTotal > 0 ? Math.round((pettyCashUtilized / pettyCashTotal) * 10000) / 100 : 0,
+      petty_cash_remaining: toNumber(round2(sub(d(pettyCashTotal), d(pettyCashUtilized)))),
+      petty_cash_utilization_rate: pettyCashTotal > 0 ? toNumber(round2(mul(div(d(pettyCashUtilized), d(pettyCashTotal)), d(100)))) : 0,
     };
     if (vendorIncluded) payload.vendor_payments_total = vendorPaymentsTotal;
 
@@ -204,11 +205,11 @@ router.get('/petty-cash', authenticate, async (req, res) => {
        WHERE p.project_id=$1 ORDER BY p.week_of DESC, p.created_at DESC`,
       [req.params.projectId]
     );
-    res.json(rows.map(r => ({
+res.json(rows.map(r => ({
       ...r,
-      utilized: parseFloat(r.utilized) || 0,
-      remaining: Math.max(0, Math.round((parseFloat(r.amount) - (parseFloat(r.utilized) || 0)) * 100) / 100),
-      utilization_rate: parseFloat(r.amount) > 0 ? Math.round((parseFloat(r.utilized) / parseFloat(r.amount)) * 10000) / 100 : 0,
+      utilized: toNumber(d(r.utilized)),
+      remaining: toNumber(round2(sub(d(r.amount), d(r.utilized)))),
+      utilization_rate: gt(d(r.amount), 0) ? toNumber(round2(mul(div(d(r.utilized), d(r.amount)), d(100)))) : 0,
     })));
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -280,23 +281,23 @@ router.get('/petty-cash/utilizations', authenticate, async (req, res) => {
     sql += ' ORDER BY pu.utilization_date DESC, pu.created_at DESC';
     const { rows } = await pool.query(sql, params);
 
-    // Running balance per disbursement (chronological), matching the ledger style
+// Running balance per disbursement (chronological), matching the ledger style
     const byDisbursement = {};
     rows.forEach(r => {
-      if (!byDisbursement[r.petty_cash_id] && r.status !== 'deleted') byDisbursement[r.petty_cash_id] = 0;
+      if (!byDisbursement[r.petty_cash_id] && r.status !== 'deleted') byDisbursement[r.petty_cash_id] = d(0);
     });
     const balanced = rows.slice().sort((a, b) =>
       (a.utilization_date + a.created_at).localeCompare(b.utilization_date + b.created_at));
     balanced.forEach(r => {
       if (r.status === 'deleted') { r.running_remaining = null; return; }
-      const used = (byDisbursement[r.petty_cash_id] || 0) + (parseFloat(r.amount) || 0);
+      const used = toNumber(add(d(byDisbursement[r.petty_cash_id]), d(r.amount)));
       byDisbursement[r.petty_cash_id] = used;
-      const remaining = Math.round((parseFloat(r.petty_cash_amount) - used) * 100) / 100;
+      const remaining = toNumber(round2(sub(d(r.petty_cash_amount), d(used))));
       r.running_remaining = Math.max(0, remaining);
     });
 
     res.json({
-total_utilized: Math.round(rows.filter(r => r.status !== 'deleted').reduce((s, r) => s + (parseFloat(r.amount) || 0), 0) * 100) / 100,
+      total_utilized: toNumber(round2(d(rows.filter(r => r.status !== 'deleted').reduce((s, r) => add(d(s), d(r.amount)), d(0))))),
       count: rows.length,
       entries: rows || [],
     });
@@ -322,17 +323,17 @@ router.get('/petty-cash/:id/utilizations', authenticate, async (req, res) => {
       [req.params.id]
     );
 
-    let used = 0;
+let used = d(0);
     const entries = rows.map(r => {
       if (r.status === 'deleted') return { ...r, running_remaining: null };
-      used = Math.round((used + parseFloat(r.amount)) * 100) / 100;
-      return { ...r, running_remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) };
+      used = round2(add(used, d(r.amount)));
+      return { ...r, running_remaining: Math.max(0, toNumber(round2(sub(d(pc[0].amount), used)))) };
     });
 
 res.json({
-      petty_cash: { ...pc[0], utilized: used, remaining: Math.max(0, Math.round((parseFloat(pc[0].amount) - used) * 100) / 100) },
+      petty_cash: { ...pc[0], utilized: toNumber(used), remaining: Math.max(0, toNumber(round2(sub(d(pc[0].amount), used)))) },
       entries: rows || [],
-      total_utilized: used,
+      total_utilized: toNumber(used),
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
@@ -362,15 +363,15 @@ const { utilization_date, date, category, amount, note, receipt_ref } = req.body
       if (pc[0].status !== 'active')
         return res.status(400).json({ error: 'Cannot add utilization while the disbursement is not active (pending deletion/deleted)' });
 
-      const { rows: usedRows } = await client.query(
+const { rows: usedRows } = await client.query(
         `SELECT COALESCE(SUM(amount), 0)::float AS used FROM petty_cash_utilization
          WHERE petty_cash_id=$1 AND status<>'deleted'`,
         [req.params.id]
       );
-      const used = parseFloat(usedRows[0].used) || 0;
-      const disbursed = parseFloat(pc[0].amount) || 0;
-      if (used + amt > disbursed + 0.0001)
-        return res.status(400).json({ error: `Utilization exceeds disbursement. Remaining: PKR ${Math.max(0, Math.round((disbursed - used) * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}` });
+      const used = d(usedRows[0].used);
+      const disbursed = d(pc[0].amount);
+      if (gt(add(used, amt), disbursed))
+        return res.status(400).json({ error: `Utilization exceeds disbursement. Remaining: PKR ${toNumber(round2(sub(disbursed, used))).toLocaleString(undefined, { maximumFractionDigits: 2 })}` });
 
 const { rows } = await client.query(
         `INSERT INTO petty_cash_utilization (petty_cash_id, utilization_date, category, amount, note, receipt_ref, created_by)
@@ -435,7 +436,7 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
       ipcPct = pct;
     }
 
-    // PO linkage: 'continuous' payments must reference a PO from the purchase_orders table.
+// PO linkage: 'continuous' payments must reference a PO from the purchase_orders table.
     // Only FULLY approved POs (Admin -> Owner two-step complete) are payable —
     // a PO awaiting either approval must stay OUT of vendor payments.
     // 'fixed_otp'/'ipc' payments are never linked to a PO — any PO fields are normalized away.
@@ -454,6 +455,19 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
       if (poRow.status === 'cancelled') return res.status(400).json({ error: 'Cannot link payment to a cancelled PO' });
       if (poRow.status !== 'approved' || poRow.admin_approval !== 'approved' || poRow.owner_approval !== 'approved')
         return res.status(400).json({ error: 'Only fully approved POs (Admin and Owner) can be linked to continuous payments' });
+
+      // Validate that continuous payment doesn't exceed PO outstanding
+      const existingPaymentsQ = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::float AS paid FROM vendor_payments
+         WHERE po_id=$1 AND status<>'deleted'`,
+        [po_id]
+      );
+      const poTotal = d(poRow.total_amount);
+      const alreadyPaid = d(existingPaymentsQ.rows[0].paid);
+      const outstanding = sub(poTotal, alreadyPaid);
+      if (gt(amt, outstanding))
+        return res.status(400).json({ error: `Payment exceeds PO outstanding. PO: ${poRow.po_number}, Outstanding: PKR ${toNumber(round2(outstanding)).toLocaleString(undefined, { maximumFractionDigits: 2 })}` });
+
       poId = po_id;
       poNumber = poRow.po_number;
       billNo = bill_number || null;
@@ -658,9 +672,9 @@ async function finalizeDeletionRequest(client, deletionRequest) {
     const table = TX_TABLES[deletionRequest.transaction_type];
     const txStatus = finalStatus === 'approved' ? 'deleted' : 'active';
     await client.query(`UPDATE ${table} SET status=$1 WHERE id=$2`, [txStatus, deletionRequest.transaction_id]);
-    // Auto-linked bank book entry (when the finance entry is deleted, the
+// Auto-linked bank book entry (when the finance entry is deleted, the
     // paired bank transaction is deleted too — no orphaned records).
-    if (finalStatus === 'approved' && ['vendor_payment', 'salary', 'petty_cash', 'amount_received'].includes(deletionRequest.transaction_type)) {
+    if (finalStatus === 'approved' && ['vendor_payment', 'salary', 'petty_cash', 'amount_received', 'petty_cash_utilization'].includes(deletionRequest.transaction_type)) {
       await client.query(
         `UPDATE bank_transactions SET status='deleted' WHERE source_type=$1 AND source_ref=$2 AND status<>'deleted'`,
         [deletionRequest.transaction_type, deletionRequest.transaction_id]
@@ -868,10 +882,10 @@ globalRouter.get('/vendor-overview', authenticate, async (req, res) => {
       [vendor_id]
     );
 
-    const activePos = pos.rows.filter((po) => po.status !== 'cancelled');
+const activePos = pos.rows.filter((po) => po.status !== 'cancelled');
     const activePayments = payments.rows.filter((vp) => vp.status !== 'deleted');
-    const totalPoValue = activePos.reduce((sum, po) => sum + (parseFloat(po.total_amount) || 0), 0);
-    const totalPaid = activePayments.reduce((sum, vp) => sum + (parseFloat(vp.amount) || 0), 0);
+    const totalPoValue = toNumber(activePos.reduce((sum, po) => add(d(sum), d(po.total_amount)), d(0)));
+    const totalPaid = toNumber(activePayments.reduce((sum, vp) => add(d(sum), d(vp.amount)), d(0)));
 
     res.json({
       vendor: vendorQ.rows[0],
@@ -879,7 +893,7 @@ globalRouter.get('/vendor-overview', authenticate, async (req, res) => {
       payments: payments.rows,
       total_po_value: totalPoValue,
       total_paid: totalPaid,
-      balance: totalPoValue - totalPaid,
+      balance: toNumber(sub(d(totalPoValue), d(totalPaid))),
     });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
