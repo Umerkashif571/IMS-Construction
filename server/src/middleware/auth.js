@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 require('dotenv').config();
-// Force rebuild: JWT_SECRET fix
+// Force rebuild: JWT_SECRET fix v2
 
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
