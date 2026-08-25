@@ -40,29 +40,25 @@ function RoleRoute({ roles, children }) {
   return children
 }
 
-function Lazy({ children }) {
-  return <Suspense fallback={<PageFallback />}>{children}</Suspense>
-}
-
 export default function App() {
   const { user } = useAuth()
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<Lazy><Dashboard /></Lazy>} />
-        <Route path="materials" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff']}><Lazy><Materials /></Lazy></RoleRoute>} />
-        <Route path="vehicles" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Lazy><Vehicles /></Lazy></RoleRoute>} />
-        <Route path="tools" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Lazy><Tools /></Lazy></RoleRoute>} />
-        <Route path="projects" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance']}><Lazy><Projects /></Lazy></RoleRoute>} />
-        <Route path="vendors" element={<RoleRoute roles={['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance']}><Lazy><Vendors /></Lazy></RoleRoute>} />
-        <Route path="warehouses" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><Warehouses /></Lazy></RoleRoute>} />
-        <Route path="reports" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff']}><Lazy><Reports /></Lazy></RoleRoute>} />
-        <Route path="users" element={<RoleRoute roles={['owner', 'admin']}><Lazy><Users /></Lazy></RoleRoute>} />
-        <Route path="backup" element={<RoleRoute roles={['owner', 'admin']}><Lazy><Backup /></Lazy></RoleRoute>} />
-        <Route path="gatepass" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><GatePass /></Lazy></RoleRoute>} />
-        <Route path="gatepass/:id" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Lazy><GatePass /></Lazy></RoleRoute>} />
-        <Route path="bankbook" element={<RoleRoute roles={['owner', 'admin', 'finance']}><Lazy><BankBook /></Lazy></RoleRoute>} />
+        <Route index element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
+        <Route path="materials" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Materials /></Suspense></RoleRoute>} />
+        <Route path="vehicles" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Vehicles /></Suspense></RoleRoute>} />
+        <Route path="tools" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Tools /></Suspense></RoleRoute>} />
+        <Route path="projects" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance']}><Suspense fallback={<PageFallback />}><Projects /></Suspense></RoleRoute>} />
+        <Route path="vendors" element={<RoleRoute roles={['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance']}><Suspense fallback={<PageFallback />}><Vendors /></Suspense></RoleRoute>} />
+        <Route path="warehouses" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Warehouses /></Suspense></RoleRoute>} />
+        <Route path="reports" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Reports /></Suspense></RoleRoute>} />
+        <Route path="users" element={<RoleRoute roles={['owner', 'admin']}><Suspense fallback={<PageFallback />}><Users /></Suspense></RoleRoute>} />
+        <Route path="backup" element={<RoleRoute roles={['owner', 'admin']}><Suspense fallback={<PageFallback />}><Backup /></Suspense></RoleRoute>} />
+        <Route path="gatepass" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
+        <Route path="gatepass/:id" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
+        <Route path="bankbook" element={<RoleRoute roles={['owner', 'admin', 'finance']}><Suspense fallback={<PageFallback />}><BankBook /></Suspense></RoleRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
