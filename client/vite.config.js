@@ -10,6 +10,23 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) return 'vendor-react'
+            if (id.includes('lucide-react') || id.includes('recharts')) return 'vendor-ui'
+            if (id.includes('axios') || id.includes('decimal.js') || id.includes('date-fns')) return 'vendor-utils'
+            if (id.includes('@supabase')) return 'vendor-supabase'
+            return 'vendor'
+          }
+        },
+      },
+    },
+    chunkSizeWarningLimit: 600,
+    cssCodeSplit: true,
+  },
   server: {
     port: 3000,
     allowedHosts: ['overbuilt-resilient-darkish.ngrok-free.dev'],
