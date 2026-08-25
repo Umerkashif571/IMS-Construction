@@ -59,18 +59,22 @@ export default function BankBook() {
       const bankData = data?.bank || data?.data?.bank;
       setLedger(ledgerData);
       setLedgerBank(bankData);
-    }).catch(err => { console.error(err); toast.error('Failed to load ledger') }).finally(() => setLedgerLoading(false))
+    }).catch(err => { console.error(err); toast.error('Failed to load ledger'); setLedger([]) }).finally(() => setLedgerLoading(false))
   }
 
   useEffect(() => { loadLedger() }, [selected])
 
   const selectedBank = banks.find(b => b.id === selected) || null
 
-  const totals = ledger.reduce((acc, t) =>
-  t.status === 'deleted' ? acc : ({
-    in: toNumber(add(d(acc.in), d(t.amount_in))),
-    out: toNumber(add(d(acc.out), d(t.amount_out))),
-  }), { in: 0, out: 0 })
+  const totals = (Array.isArray(ledger) ? ledger : []).reduce((acc, t) => {
+    if (t?.status === 'deleted') return acc
+    const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
+    const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
+    return {
+      in: toNumber(add(d(acc.in), d(inVal))),
+      out: toNumber(add(d(acc.out), d(outVal))),
+    }
+  }, { in: 0, out: 0 })
 
   const submitDeletion = async () => {
     if (!delReason.trim()) return toast.error('Reason is required')
