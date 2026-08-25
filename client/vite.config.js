@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   build: {
+    minify: 'esbuild',
+    cssMinify: true,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
@@ -19,13 +21,34 @@ export default defineConfig({
             if (id.includes('lucide-react') || id.includes('recharts')) return 'vendor-ui'
             if (id.includes('axios') || id.includes('decimal.js') || id.includes('date-fns')) return 'vendor-utils'
             if (id.includes('@supabase')) return 'vendor-supabase'
+            if (id.includes('react-window') || id.includes('react-virtualized-auto-sizer')) return 'vendor-virtual'
             return 'vendor'
           }
+          // Split large pages into their own chunks
+          if (id.includes('/pages/')) {
+            if (id.includes('Dashboard')) return 'page-dashboard'
+            if (id.includes('Materials')) return 'page-materials'
+            if (id.includes('Reports')) return 'page-reports'
+            if (id.includes('Projects')) return 'page-projects'
+            if (id.includes('Vendors')) return 'page-vendors'
+            if (id.includes('Vehicles')) return 'page-vehicles'
+            if (id.includes('Tools')) return 'page-tools'
+            if (id.includes('Warehouses')) return 'page-warehouses'
+            if (id.includes('BankBook')) return 'page-bankbook'
+            if (id.includes('GatePass')) return 'page-gatepass'
+            if (id.includes('Users')) return 'page-users'
+            if (id.includes('Backup')) return 'page-backup'
+            return 'page-other'
+          }
         },
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash].[ext]',
       },
     },
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 500,
     cssCodeSplit: true,
+    reportCompressedSize: false,
   },
   server: {
     port: 3000,

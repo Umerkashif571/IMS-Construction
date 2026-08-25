@@ -7,6 +7,10 @@ import { AuthProvider } from './context/AuthContext'
 import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 
+if (typeof window !== 'undefined') {
+  window.__IMS_START__ = performance.now()
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
