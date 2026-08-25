@@ -119,7 +119,7 @@ export default function Reports() {
             </div>
           </div>
           {loadingReport ? (
-            <div className="no-print"><LoadingSkeleton rows={5} cols={cfg.keys.length} /></div>
+            <div className="no-print"><LoadingSkeleton rows={5} cols={cfg?.keys?.length ?? 4} /></div>
           ) : (
             <div className="print-area">
               <h2 className="hidden print:block text-lg font-bold mb-2">{reportTypes.find(r => r.key === activeReport)?.label}</h2>
@@ -146,7 +146,7 @@ export default function Reports() {
                     </tr>
                   ))}
                   {safeArray(data).length === 0 && (
-                    <tr><td colSpan={cfg.keys.length} className="text-center py-10"><EmptyState icon={BarChart3} title="No data" text="No data available for this report" /></td></tr>
+                    <tr><td colSpan={cfg?.keys?.length ?? 4} className="text-center py-10"><EmptyState icon={BarChart3} title="No data" text="No data available for this report" /></td></tr>
                   )}
                 </tbody>
               </table>
