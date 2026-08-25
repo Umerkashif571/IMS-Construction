@@ -67,12 +67,17 @@ export default function BankBook() {
   const selectedBank = banks.find(b => b.id === selected) || null
 
   const totals = (Array.isArray(ledger) ? ledger : []).reduce((acc, t) => {
-    if (t?.status === 'deleted') return acc
-    const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
-    const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
-    return {
-      in: toNumber(add(d(acc.in), d(inVal))),
-      out: toNumber(add(d(acc.out), d(outVal))),
+    if (!t || t?.status === 'deleted') return acc
+    try {
+      const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
+      const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
+      return {
+        in: toNumber(add(d(acc.in), d(inVal))),
+        out: toNumber(add(d(acc.out), d(outVal))),
+      }
+    } catch (e) {
+      console.error('totals calc error', t, e)
+      return acc
     }
   }, { in: 0, out: 0 })
 
@@ -105,16 +110,19 @@ export default function BankBook() {
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {safeArray(banks).map(bank => (
-              <StatCard
-                key={bank.id}
-                label={bank.name}
-                value={formatPKR(bank.balance)}
-                icon={Landmark}
-                color={(bank.balance || 0) < 0 ? 'red' : 'green'}
-                onClick={() => setSelected(bank.id)}
-              />
-            ))}
+            {safeArray(banks).map(bank => {
+              const bal = bank?.balance ?? 0
+              return (
+                <StatCard
+                  key={bank.id}
+                  label={bank.name}
+                  value={formatPKR(bal)}
+                  icon={Landmark}
+                  color={bal < 0 ? 'red' : 'green'}
+                  onClick={() => setSelected(bank.id)}
+                />
+              )
+            })}
           </div>
 
           {selected && (
@@ -135,36 +143,41 @@ export default function BankBook() {
                         ))}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {safeArray(ledger).map(t => (
-                          <tr key={t.id} className="hover:bg-slate-50">
-                            <td className="px-4 py-2.5 text-slate-500">{fmtDate(t.date)}</td>
-                            <td className="px-4 py-2.5 font-medium">{t.payee_name}</td>
-                            <td className="px-4 py-2.5 text-slate-500">{t.cheque_no || '-'}</td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{parseFloat(t.amount_in) > 0 ? formatPKR(t.amount_in) : '-'}</td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-red-600">{parseFloat(t.amount_out) > 0 ? formatPKR(t.amount_out) : '-'}</td>
-                            <td className="px-4 py-2.5 text-right font-bold">{t.running_balance === null ? '-' : formatPKR(t.running_balance)}</td>
-                            <td className="px-4 py-2.5">
-                              {t.source_type === 'manual' || !t.source_type ? (
-                                <Badge variant="default">Manual</Badge>
-                              ) : (
-                                <Badge variant="warning">Auto — {SOURCE_LABELS[t.source_type] || t.source_type.replace(/_/g, ' ')}</Badge>
-                              )}
-                            </td>
-                            <td className="px-4 py-2.5">{txStatusBadge(t.status)}</td>
-                            <td className="px-4 py-2.5 text-slate-500">{t.created_by_name || '-'}</td>
-                            <td className="px-4 py-2.5">
-                              {t.status === 'active' && (!t.source_type || t.source_type === 'manual') && (
-                                <button
-                                  onClick={() => { setDelReason(''); setDelTarget(t) }}
-                                  className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors"
-                                  title="Request Deletion"
-                                >
-                                  <Trash2 size={15} />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                        {safeArray(ledger).map(t => {
+                            const amountIn = t?.amount_in != null ? parseFloat(t.amount_in) : 0
+                            const amountOut = t?.amount_out != null ? parseFloat(t.amount_out) : 0
+                            const runningBal = t?.running_balance != null ? t.running_balance : null
+                            return (
+                              <tr key={t.id} className="hover:bg-slate-50">
+                                <td className="px-4 py-2.5 text-slate-500">{fmtDate(t.date)}</td>
+                                <td className="px-4 py-2.5 font-medium">{t.payee_name}</td>
+                                <td className="px-4 py-2.5 text-slate-500">{t.cheque_no || '-'}</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{amountIn > 0 ? formatPKR(amountIn) : '-'}</td>
+                                <td className="px-4 py-2.5 text-right font-semibold text-red-600">{amountOut > 0 ? formatPKR(amountOut) : '-'}</td>
+                                <td className="px-4 py-2.5 text-right font-bold">{runningBal === null ? '-' : formatPKR(runningBal)}</td>
+                                <td className="px-4 py-2.5">
+                                  {t.source_type === 'manual' || !t.source_type ? (
+                                    <Badge variant="default">Manual</Badge>
+                                  ) : (
+                                    <Badge variant="warning">Auto — {SOURCE_LABELS[t.source_type] || t.source_type?.replace(/_/g, ' ')}</Badge>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5">{txStatusBadge(t.status)}</td>
+                                <td className="px-4 py-2.5 text-slate-500">{t.created_by_name || '-'}</td>
+                                <td className="px-4 py-2.5">
+                                  {t.status === 'active' && (!t.source_type || t.source_type === 'manual') && (
+                                    <button
+                                      onClick={() => { setDelReason(''); setDelTarget(t) }}
+                                      className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors"
+                                      title="Request Deletion"
+                                    >
+                                      <Trash2 size={15} />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            )
+                          })}
                       </tbody>
                     </table>
                   </div>
@@ -173,11 +186,11 @@ export default function BankBook() {
             </Card>
           )}
 
-          {selectedBank && (
+          {selectedBank && totals && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <StatCard label="Total In" value={formatPKR(totals.in)} icon={ArrowDownLeft} color="green" />
-              <StatCard label="Total Out" value={formatPKR(totals.out)} icon={ArrowUpRight} color="red" />
-              <StatCard label="Closing Balance" value={formatPKR(totals.in - totals.out)} icon={Landmark} color={(totals.in - totals.out) < 0 ? 'red' : 'teal'} />
+              <StatCard label="Total In" value={formatPKR(totals.in ?? 0)} icon={ArrowDownLeft} color="green" />
+              <StatCard label="Total Out" value={formatPKR(totals.out ?? 0)} icon={ArrowUpRight} color="red" />
+              <StatCard label="Closing Balance" value={formatPKR((totals.in ?? 0) - (totals.out ?? 0))} icon={Landmark} color={((totals.in ?? 0) - (totals.out ?? 0)) < 0 ? 'red' : 'teal'} />
             </div>
           )}
         </>
