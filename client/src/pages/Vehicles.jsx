@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, Badge, useDebouncedValue } from '../components/ui'
-import { Plus, Search, Truck, Edit3, Trash2, Fuel, Wrench, ChevronRight, ChevronDown } from 'lucide-react'
+import { Plus, Search, Truck, Edit3, Trash2, Fuel, Wrench, ChevronRight, ChevronDown, Truck as TruckIcon, ArrowRightLeft, AlertTriangle, Unlink2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 
@@ -22,8 +22,11 @@ export default function Vehicles() {
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
   const [fuelModal, setFuelModal] = useState({ open: false, vehicle: null })
   const [maintenanceModal, setMaintenanceModal] = useState({ open: false, vehicle: null })
+  const [assignModal, setAssignModal] = useState({ open: false, vehicle: null, isReassign: false })
+  const [unassignConfirm, setUnassignConfirm] = useState({ open: false, vehicle: null })
   const [fuelForm, setFuelForm] = useState({ liters: '', cost: '', notes: '' })
   const [maintForm, setMaintForm] = useState({ type: '', description: '', cost: '', date: '' })
+  const [assignForm, setAssignForm] = useState({ project_id: '' })
   const [expanded, setExpanded] = useState(null)
   const [fuelLogs, setFuelLogs] = useState([])
   const [maintLogs, setMaintLogs] = useState([])
@@ -34,7 +37,7 @@ export default function Vehicles() {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
     Promise.all([api.get(`/vehicles${params}`), api.get('/projects')])
-      .then(([vRes, pRes]) => { setVehicles(vRes.data); setProjects(pRes.data || []) })
+      .then(([vRes, pRes]) => { setVehicles(vRes?.data?.data || vRes?.data || []); setProjects(pRes?.data?.data || pRes?.data || []) })
       .catch(err => { console.error(err); toast.error('Failed to load vehicles') })
       .finally(() => setLoading(false))
   }
@@ -70,6 +73,36 @@ export default function Vehicles() {
       toast.success('Maintenance log added'); setMaintenanceModal({ open: false, vehicle: null }); setMaintForm({ type: '', description: '', cost: '', date: '' })
       if (expanded === maintenanceModal.vehicle.id) loadMaintLogs(maintenanceModal.vehicle.id)
     } catch (err) { console.error(err); toast.error('Failed to add maintenance log') }
+  }
+
+  const handleAssignSubmit = async () => {
+    if (!assignForm.project_id) return toast.error('Select a project')
+    try {
+      await api.post(`/vehicles/${assignModal.vehicle.id}/assign-project`, { project_id: assignForm.project_id })
+      const action = assignModal.isReassign ? 'reassigned' : 'assigned'
+      toast.success(`Vehicle ${action} successfully`)
+      setAssignModal({ open: false, vehicle: null, isReassign: false })
+      setAssignForm({ project_id: '' })
+      load(search)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to assign project') }
+  }
+
+  const openAssignModal = (vehicle, isReassign) => {
+    setAssignModal({ open: true, vehicle, isReassign })
+    setAssignForm({ project_id: '' })
+  }
+
+  const handleUnassignSubmit = async () => {
+    try {
+      await api.post(`/vehicles/${unassignConfirm.vehicle.id}/unassign-project`)
+      toast.success('Vehicle unassigned successfully')
+      setUnassignConfirm({ open: false, vehicle: null })
+      load(search)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to unassign project') }
+  }
+
+  const openUnassignConfirm = (vehicle) => {
+    setUnassignConfirm({ open: true, vehicle })
   }
 
   const loadFuelLogs = async (id) => { try { const { data } = await api.get(`/vehicles/${id}/fuel`); setFuelLogs(data) } catch (e) { setFuelLogs([]) } }
@@ -125,6 +158,14 @@ export default function Vehicles() {
                     {canEdit && (
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
+                          {v.assigned_project_id ? (
+                            <>
+                              <button onClick={(e) => { e.stopPropagation(); openAssignModal(v, true) }} className="p-1.5 hover:bg-violet-50 rounded text-violet-600 transition-colors" title="Reassign Project"><ArrowRightLeft size={15} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); openUnassignConfirm(v) }} className="p-1.5 hover:bg-orange-50 rounded text-orange-600 transition-colors" title="Unassign Project"><Unlink2 size={15} /></button>
+                            </>
+                          ) : (
+                            <button onClick={(e) => { e.stopPropagation(); openAssignModal(v, false) }} className="p-1.5 hover:bg-indigo-50 rounded text-indigo-600 transition-colors" title="Assign Project"><TruckIcon size={15} /></button>
+                          )}
                           <button onClick={(e) => { e.stopPropagation(); setModal({ open: true, item: v }) }} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
                           <button onClick={(e) => { e.stopPropagation(); setFuelModal({ open: true, vehicle: v }) }} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Add Fuel"><Fuel size={15} /></button>
                           <button onClick={(e) => { e.stopPropagation(); setMaintenanceModal({ open: true, vehicle: v }) }} className="p-1.5 hover:bg-amber-50 rounded text-amber-600 transition-colors" title="Add Maintenance"><Wrench size={15} /></button>
@@ -179,6 +220,7 @@ export default function Vehicles() {
         <VehicleForm data={modal.item} projects={projects} onSave={handleSave} onCancel={() => setModal({ open: false, item: null })} />
       </Modal>
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this vehicle?" />
+      <ConfirmDialog isOpen={unassignConfirm.open} onClose={() => setUnassignConfirm({ open: false, vehicle: null })} onConfirm={handleUnassignSubmit} message={`Unassign ${unassignConfirm.vehicle?.registration_no} from project "${unassignConfirm.vehicle?.project_name}"?`} confirmText="Unassign" variant="destructive" />
 
       <Modal isOpen={fuelModal.open} onClose={() => { setFuelModal({ open: false, vehicle: null }); setFuelForm({ liters: '', cost: '', notes: '' }) }} title={`Fuel Log: ${fuelModal.vehicle?.registration_no}`} size="max-w-sm">
         <div className="space-y-5">
@@ -202,6 +244,17 @@ export default function Vehicles() {
           <Button onClick={handleMaintSubmit} className="w-full"><Wrench size={16} /> Add Maintenance Log</Button>
         </div>
       </Modal>
+
+      <AssignProjectModal
+        isOpen={assignModal.open}
+        onClose={() => { setAssignModal({ open: false, vehicle: null, isReassign: false }); setAssignForm({ project_id: '' }) }}
+        vehicle={assignModal.vehicle}
+        isReassign={assignModal.isReassign}
+        projects={projects}
+        onSubmit={handleAssignSubmit}
+        form={assignForm}
+        onFormChange={e => setAssignForm({ ...assignForm, project_id: e.target.value })}
+      />
     </div>
   )
 }
@@ -263,6 +316,36 @@ function VehicleForm({ data, projects, onSave, onCancel }) {
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
+  )
+}
+
+function AssignProjectModal({ isOpen, onClose, vehicle, isReassign, projects, onSubmit, form, onFormChange }) {
+  if (!vehicle) return null
+  const activeProjects = projects.filter(p => p.status === 'active' || p.status === 'planning' || p.status === 'on_hold')
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={isReassign ? `Reassign Project: ${vehicle.registration_no}` : `Assign Project: ${vehicle.registration_no}`} size="max-w-md">
+      <div className="space-y-5">
+        {isReassign && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={18} className="text-amber-600 mt-0.5" />
+              <div className="text-sm text-amber-800">
+                <p className="font-medium">Confirm Reassignment</p>
+                <p className="mt-1">This will change the vehicle's project from <strong>{vehicle.project_name || 'Unassigned'}</strong> to a new project. This affects allocation history and reporting.</p>
+              </div>
+            </div>
+          </div>
+        )}
+        <Select label="Select Project *" value={form.project_id} onChange={onFormChange}>
+          <option value="">-- Select Project --</option>
+          {activeProjects.map(p => <option key={p.id} value={p.id}>{p.name} ({p.status})</option>)}
+        </Select>
+        <div className="flex gap-3 pt-2">
+          <Button onClick={onSubmit} className="w-full" variant={isReassign ? 'default' : 'default'}>{isReassign ? 'Reassign' : 'Assign'}</Button>
+          <Button type="button" variant="secondary" onClick={onClose} className="w-full">Cancel</Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

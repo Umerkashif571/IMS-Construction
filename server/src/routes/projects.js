@@ -7,21 +7,54 @@ const router = express.Router();
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { status, search } = req.query;
-    let sql = `SELECT p.*,
-      (SELECT COUNT(*) FROM project_allocations WHERE project_id=p.id) as allocation_count,
-      (SELECT COALESCE(SUM(mt.quantity * m.unit_cost), 0)
-       FROM material_transactions mt
-       JOIN materials m ON mt.material_id = m.id
-       WHERE mt.project_id = p.id AND mt.type = 'out') as total_material_cost
-      FROM projects p WHERE 1=1`;
+    const { status, search, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    // Optimized query using LEFT JOIN with aggregation instead of correlated subqueries
+    let sql = `
+      SELECT p.*,
+        COALESCE(alloc.alloc_count, 0) as allocation_count,
+        COALESCE(mat.total_cost, 0) as total_material_cost
+      FROM projects p
+      LEFT JOIN (
+        SELECT project_id, COUNT(*) as alloc_count
+        FROM project_allocations
+        GROUP BY project_id
+      ) alloc ON alloc.project_id = p.id
+      LEFT JOIN (
+        SELECT mt.project_id, COALESCE(SUM(mt.quantity * m.unit_cost), 0) as total_cost
+        FROM material_transactions mt
+        JOIN materials m ON mt.material_id = m.id
+        WHERE mt.type = 'out'
+        GROUP BY mt.project_id
+      ) mat ON mat.project_id = p.id
+      WHERE 1=1
+    `;
     const params = [];
     let idx = 1;
     if (status) { sql += ` AND p.status = $${idx}`; params.push(status); idx++; }
     if (search) { sql += ` AND (p.name ILIKE $${idx} OR p.client ILIKE $${idx} OR p.location ILIKE $${idx})`; params.push(`%${search}%`); idx++; }
-    sql += ' ORDER BY p.created_at DESC';
+
+    // Count total
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY p.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
     const { rows } = await pool.query(sql, params);
-    res.json(rows);
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -29,11 +62,22 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT p.*,
-        (SELECT COALESCE(SUM(mt.quantity * m.unit_cost), 0)
-         FROM material_transactions mt
-         JOIN materials m ON mt.material_id = m.id
-         WHERE mt.project_id = p.id AND mt.type = 'out') as total_material_cost
-       FROM projects p WHERE p.id = $1`,
+        COALESCE(alloc.alloc_count, 0) as allocation_count,
+        COALESCE(mat.total_cost, 0) as total_material_cost
+      FROM projects p
+      LEFT JOIN (
+        SELECT project_id, COUNT(*) as alloc_count
+        FROM project_allocations
+        GROUP BY project_id
+      ) alloc ON alloc.project_id = p.id
+      LEFT JOIN (
+        SELECT mt.project_id, COALESCE(SUM(mt.quantity * m.unit_cost), 0) as total_cost
+        FROM material_transactions mt
+        JOIN materials m ON mt.material_id = m.id
+        WHERE mt.type = 'out'
+        GROUP BY mt.project_id
+      ) mat ON mat.project_id = p.id
+      WHERE p.id = $1`,
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });

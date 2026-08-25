@@ -118,4 +118,73 @@ router.get('/:id/maintenance', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// Assign/Reassign vehicle to project
+router.post('/:id/assign-project', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
+  try {
+    const { project_id } = req.body;
+    if (!project_id) return res.status(400).json({ error: 'Project ID required' });
+
+    const { rows: vehicle } = await pool.query('SELECT * FROM vehicles WHERE id=$1 AND is_active=true', [req.params.id]);
+    if (vehicle.length === 0) return res.status(404).json({ error: 'Vehicle not found' });
+
+    const oldProjectId = vehicle[0].assigned_project_id;
+    const oldProjectName = vehicle[0].project_name || null;
+
+    let newProjectName = null;
+    if (project_id) {
+      const { rows: proj } = await pool.query('SELECT name FROM projects WHERE id=$1', [project_id]);
+      if (proj.length === 0) return res.status(400).json({ error: 'Project not found' });
+      newProjectName = proj[0].name;
+    }
+
+    const { rows } = await pool.query(
+      'UPDATE vehicles SET assigned_project_id=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+      [project_id || null, req.params.id]
+    );
+
+    const action = oldProjectId ? 'reassigned' : 'assigned';
+    const desc = oldProjectId
+      ? `Reassigned vehicle ${rows[0].registration_no} from project "${oldProjectName}" to "${newProjectName}"`
+      : `Assigned vehicle ${rows[0].registration_no} to project "${newProjectName}"`;
+
+    await logAudit(
+      req.user.id, req.user.full_name, req.user.role,
+      action, 'vehicle', rows[0].id, desc,
+      { old_project_id: oldProjectId, old_project_name: oldProjectName, new_project_id: project_id, new_project_name: newProjectName }
+    );
+    await addActivity(req.user.full_name, action, desc, 'vehicle', rows[0].id);
+
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Unassign vehicle from project
+router.post('/:id/unassign-project', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
+  try {
+    const { rows: vehicle } = await pool.query('SELECT * FROM vehicles WHERE id=$1 AND is_active=true', [req.params.id]);
+    if (vehicle.length === 0) return res.status(404).json({ error: 'Vehicle not found' });
+
+    const oldProjectId = vehicle[0].assigned_project_id;
+    const oldProjectName = vehicle[0].project_name || null;
+
+    if (!oldProjectId) return res.status(400).json({ error: 'Vehicle is not assigned to any project' });
+
+    const { rows } = await pool.query(
+      'UPDATE vehicles SET assigned_project_id=NULL, updated_at=NOW() WHERE id=$1 RETURNING *',
+      [req.params.id]
+    );
+
+    const desc = `Unassigned vehicle ${rows[0].registration_no} from project "${oldProjectName}"`;
+
+    await logAudit(
+      req.user.id, req.user.full_name, req.user.role,
+      'unassigned', 'vehicle', rows[0].id, desc,
+      { old_project_id: oldProjectId, old_project_name: oldProjectName }
+    );
+    await addActivity(req.user.full_name, 'unassigned', desc, 'vehicle', rows[0].id);
+
+    res.json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
 module.exports = router;

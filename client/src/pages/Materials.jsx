@@ -1,19 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, useDebouncedValue } from '../components/ui'
-import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket } from 'lucide-react'
+import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, useDebouncedValue, Pagination } from '../components/ui'
+import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket, Wifi, WifiOff, RotateCcw } from 'lucide-react'
 import { GatePassDetail } from './GatePass'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import { useSupabaseChannel, useCoalescedRealtime } from '../hooks/useRealtime'
+import { useCategories, useProjects, useWarehouses } from '../hooks/useReferenceData'
+import { supabase } from '../lib/supabase'
+
+// Safe array extraction from API responses which may return { data: [], pagination: {} } or arrays directly
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
 export default function Materials() {
   const { user } = useAuth()
   const [materials, setMaterials] = useState([])
-  const [categories, setCategories] = useState([])
-  const [projects, setProjects] = useState([])
-  const [warehouses, setWarehouses] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search)
@@ -27,6 +30,67 @@ export default function Materials() {
   const [stockOutModal, setStockOutModal] = useState({ open: false, material: null })
   const [stockOutForm, setStockOutForm] = useState({ quantity: '', project_id: '', warehouse_id: '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' })
   const [gpPopup, setGpPopup] = useState({ open: false, gp: null })
+  const [realtimeConnected, setRealtimeConnected] = useState(true)
+  const [materialsPage, setMaterialsPage] = useState(1)
+  const [materialsTotalPages, setMaterialsTotalPages] = useState(1)
+
+  const { data: categories, loading: categoriesLoading, invalidate: invalidateCategories } = useCategories()
+  const { data: projects, loading: projectsLoading, invalidate: invalidateProjects } = useProjects({ page: materialsPage, search: debouncedSearch })
+  const { data: warehouses, loading: warehousesLoading, invalidate: invalidateWarehouses } = useWarehouses()
+
+  const detailRequestIdRef = useRef(0)
+
+  const materialsSubscriptions = useMemo(() => [
+    { table: 'materials', event: '*' },
+    { table: 'stock_movements', event: '*' },
+    { table: 'material_transactions', event: '*' },
+  ], [])
+
+  const load = useCallback((page = 1, q = '') => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (q) params.set('search', q)
+    params.set('page', page)
+    params.set('limit', 50)
+    api.get(`/materials?${params.toString()}`)
+      .then(({ data }) => {
+        setMaterials(safeArray(data))
+        setMaterialsPage(data.pagination?.page || page)
+        setMaterialsTotalPages(data.pagination?.totalPages || 1)
+      })
+      .catch(err => { console.error(err); toast.error('Failed to load materials') })
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => { load(materialsPage, debouncedSearch) }, [debouncedSearch, materialsPage, load])
+
+  useCoalescedRealtime(materialsSubscriptions, useCallback((payloads) => {
+    console.log('Coalesced realtime updates on materials:', payloads.length, 'events')
+    load(materialsPage, search)
+    invalidateCategories()
+    invalidateProjects()
+    invalidateWarehouses()
+  }, [load, search, materialsPage, invalidateCategories, invalidateProjects, invalidateWarehouses]), { debounceMs: 500 })
+
+  // Track realtime connection status
+  useSupabaseChannel('materials-connection-status', {
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'materials-page' },
+    },
+  })
+
+  useEffect(() => {
+    const channel = supabase.channel('connection-monitor')
+    channel
+      .on('system', {}, (payload) => {
+        if (payload.type === 'connect') setRealtimeConnected(true)
+        if (payload.type === 'disconnect') setRealtimeConnected(false)
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
 
   const getDateRange = (mode) => {
     const now = new Date()
@@ -49,28 +113,15 @@ export default function Materials() {
     }
   }
 
-  const filterByDate = (tx) => {
-    if (dateFilter.mode === 'all') return true
-    const range = dateFilter.mode === 'custom' ? { from: dateFilter.from, to: dateFilter.to } : getDateRange(dateFilter.mode)
-    if (!range || !range.from) return true
-    const txDate = new Date(tx.created_at)
-    const from = new Date(range.from)
-    const to = range.to ? new Date(range.to + 'T23:59:59.999') : new Date(864e13)
-    return txDate >= from && txDate <= to
-  }
+  const getCurrentDateRange = useCallback(() => {
+    if (dateFilter.mode === 'all') return { from: null, to: null }
+    if (dateFilter.mode === 'custom') return { from: dateFilter.from || null, to: dateFilter.to || null }
+    return getDateRange(dateFilter.mode)
+  }, [dateFilter])
 
   const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
 
-  const load = (q = '') => {
-    setLoading(true)
-    const params = q ? `?search=${q}` : ''
-    Promise.all([api.get(`/materials${params}`), api.get('/materials/categories/list'), api.get('/projects'), api.get('/warehouses')])
-      .then(([matRes, catRes, projRes, whRes]) => { setMaterials(matRes.data); setCategories(catRes.data); setProjects(projRes.data); setWarehouses(whRes.data) })
-      .catch(err => { console.error(err); toast.error('Failed to load materials') })
-      .finally(() => setLoading(false))
-  }
-
-  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
+  useEffect(() => { load(debouncedSearch) }, [debouncedSearch, load])
 
   const handleSave = async (form) => {
     try {
@@ -85,10 +136,40 @@ export default function Materials() {
     catch (err) { console.error(err); toast.error('Failed to delete') }
   }
 
-  const openDetail = async (material) => {
-    try { const { data } = await api.get(`/materials/${material.id}/transactions`); setDetailModal({ open: true, material, transactions: data }) }
-    catch (err) { console.error(err); toast.error('Failed to load transactions') }
-  }
+  const openDetail = useCallback(async (material, from = null, to = null) => {
+    const currentRequestId = ++detailRequestIdRef.current
+    try {
+      const params = new URLSearchParams()
+      if (from) params.append('from', from)
+      if (to) params.append('to', to)
+      const query = params.toString() ? `?${params.toString()}` : ''
+      const { data } = await api.get(`/materials/${material.id}/transactions${query}`)
+      
+      // Stale response guard: ignore if a newer request has started
+      if (currentRequestId !== detailRequestIdRef.current) return
+      
+      // Modal still open & same material check
+      // API returns { data: rows, pagination: {...} }
+      const transactions = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      setDetailModal(prev => {
+        if (prev.material?.id !== material.id) return prev
+        return { open: true, material, transactions }
+      })
+    } catch (err) {
+      if (currentRequestId === detailRequestIdRef.current) {
+        console.error(err)
+        toast.error('Failed to load transactions')
+      }
+    }
+  }, [])
+
+  // Refetch transactions when date filter changes while detail modal is open
+  useEffect(() => {
+    if (detailModal.open && detailModal.material) {
+      const range = dateFilter.mode === 'custom' ? { from: dateFilter.from, to: dateFilter.to } : getDateRange(dateFilter.mode)
+      openDetail(detailModal.material, range?.from || null, range?.to || null)
+    }
+  }, [dateFilter, detailModal.open, detailModal.material, openDetail])
 
   // Deep link: /materials?material=<id> opens the material detail modal
   const [searchParams] = useSearchParams()
@@ -97,7 +178,7 @@ export default function Materials() {
     if (!materialParam) return
     api.get(`/materials/${materialParam}`).then(({ data }) => openDetail(data)).catch(err => { console.error(err); toast.error('Failed to load material from notification') })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materialParam])
+  }, [materialParam, openDetail])
 
   const handleStockIn = async () => {
     if (!stockInQty.quantity || parseFloat(stockInQty.quantity) <= 0) return toast.error('Enter valid quantity')
@@ -144,8 +225,8 @@ export default function Materials() {
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock out') }
   }
 
-  const stockInTx = detailModal.transactions.filter(t => t.type === 'in' && filterByDate(t))
-  const stockOutTx = detailModal.transactions.filter(t => t.type === 'out' && filterByDate(t))
+  const stockInTx = safeArray(detailModal.transactions).filter(t => t.type === 'in')
+  const stockOutTx = safeArray(detailModal.transactions).filter(t => t.type === 'out')
 
   return (
     <div className="space-y-6">
@@ -154,11 +235,19 @@ export default function Materials() {
           <h1 className="text-xl font-bold text-slate-800">Materials Inventory</h1>
           <p className="text-xs text-slate-500 mt-0.5">Manage stock levels, track movements</p>
         </div>
-        {canEdit && (
-          <Button onClick={() => setModal({ open: true, item: {} })}>
-            <Plus size={16} /> Add Material
-          </Button>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
+            <span className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+            <span className="text-xs font-medium text-slate-600">
+              {realtimeConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+          {canEdit && (
+            <Button onClick={() => setModal({ open: true, item: {} })}>
+              <Plus size={16} /> Add Material
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -176,24 +265,25 @@ export default function Materials() {
       {loading ? (
         <LoadingSkeleton rows={6} cols={9} />
       ) : (
-        <Table
-          headers={[
-            { label: 'SKU' }, { label: 'Name' }, { label: 'Category' },
-            { label: 'Qty', align: 'right' }, { label: 'Unit' },
-            { label: 'Unit Cost', align: 'right' }, { label: 'Total Value', align: 'right' },
-            { label: 'Location' }, { label: 'Actions', align: 'center' },
-          ]}
-          empty={
-            <EmptyState icon={Package} title="No materials found" text="Add your first material to start tracking inventory"
-              action={canEdit ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Material</Button> : null}
-            />
-          }
-        >
-          {materials.map(m => (
-            <tr key={m.id} className={`hover:bg-slate-50 transition-colors ${(parseFloat(m.quantity) || 0) <= (parseFloat(m.reorder_level) || 0) ? 'bg-red-50/50' : ''}`}>
-              <Td><span className="font-mono text-xs text-slate-500">{m.sku || '-'}</span></Td>
-              <Td>
-                <button onClick={() => openDetail(m)} className="font-medium text-amber-600 hover:text-amber-700 hover:underline text-left flex items-center gap-1">
+        <>
+          <Table
+            headers={[
+              { label: 'SKU' }, { label: 'Name' }, { label: 'Category' },
+              { label: 'Qty', align: 'right' }, { label: 'Unit' },
+              { label: 'Unit Cost', align: 'right' }, { label: 'Total Value', align: 'right' },
+              { label: 'Location' }, { label: 'Actions', align: 'center' },
+            ]}
+            empty={
+              <EmptyState icon={Package} title="No materials found" text="Add your first material to start tracking inventory"
+                action={canEdit ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Material</Button> : null}
+              />
+            }
+          >
+            {safeArray(materials).map(m => (
+              <tr key={m.id} className={`hover:bg-slate-50 transition-colors ${(parseFloat(m.quantity) || 0) <= (parseFloat(m.reorder_level) || 0) ? 'bg-red-50/50' : ''}`}>
+                <Td><span className="font-mono text-xs text-slate-500">{m.sku || '-'}</span></Td>
+                <Td>
+                <button onClick={() => { const range = getCurrentDateRange(); openDetail(m, range.from, range.to) }} className="font-medium text-amber-600 hover:text-amber-700 hover:underline text-left flex items-center gap-1">
                   {m.name} <ExternalLink size={12} />
                 </button>
               </Td>
@@ -215,19 +305,27 @@ export default function Materials() {
                       <button onClick={() => {
   setStockInModal({ open: true, material: m });
   setStockInQty({ quantity: '', warehouse_id: m.warehouse_id || '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' });
-  api.get('/purchase-orders').then(({ data }) => setAvailablePos((data || []).filter(p => ['approved', 'partial_received'].includes(p.status)))).catch(() => {});
+  api.get('/purchase-orders').then(({ data }) => setAvailablePos((data?.data || []).filter(p => ['approved', 'partial_received'].includes(p.status)))).catch(() => {});
 }} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Stock In"><ArrowDownToLine size={15} /></button>
                       <button onClick={() => { setStockOutModal({ open: true, material: m }); setStockOutForm({ quantity: '', project_id: '', warehouse_id: m.warehouse_id || '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' }) }} className="p-1.5 hover:bg-amber-50 rounded text-amber-600 transition-colors" title="Stock Out"><ArrowUpFromLine size={15} /></button>
                       <button onClick={() => setModal({ open: true, item: m })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
                       <button onClick={() => setDeleteConfirm({ open: true, id: m.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
                     </>
                   )}
-                  <button onClick={() => openDetail(m)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 transition-colors" title="History"><History size={15} /></button>
+                  <button onClick={() => { const range = getCurrentDateRange(); openDetail(m, range.from, range.to) }} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 transition-colors" title="History"><History size={15} /></button>
                 </div>
               </Td>
             </tr>
           ))}
         </Table>
+        <Pagination
+          page={materialsPage}
+          totalPages={materialsTotalPages}
+          onPageChange={setMaterialsPage}
+          showTotal
+          total={materialsTotalPages * 50}
+        />
+        </>
       )}
 
       <Modal isOpen={modal.open} onClose={() => setModal({ open: false, item: null })} title={modal.item?.id ? 'Edit Material' : 'Add Material'} size="max-w-2xl">
@@ -236,7 +334,7 @@ export default function Materials() {
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Are you sure you want to delete this material?" />
 
       {/* Detail Modal */}
-      <Modal isOpen={detailModal.open} onClose={() => setDetailModal({ open: false, material: null, transactions: [] })} title={detailModal.material?.name || 'Material Details'} size="max-w-5xl">
+      <Modal isOpen={detailModal.open} onClose={() => { detailRequestIdRef.current++; setDetailModal({ open: false, material: null, transactions: [] }) }} title={detailModal.material?.name || 'Material Details'} size="max-w-5xl">
         {detailModal.material && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 rounded-xl p-5">
@@ -286,7 +384,7 @@ export default function Materials() {
                       {['Date', 'Quantity', 'Running Total', 'Warehouse', 'Source', 'Received By', 'Added By', 'Notes'].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}
                     </tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {stockInTx.map(t => (
+                      {stockInTx?.map(t => (
                         <tr key={t.id} className="hover:bg-slate-50"><td className="px-4 py-2.5 text-xs text-slate-500">{t.date ? new Date(t.date).toLocaleString() : '-'}</td><td className="px-4 py-2.5 font-semibold text-emerald-600">+{(parseFloat(t.quantity) || 0).toLocaleString()}</td><td className="px-4 py-2.5 font-medium">{(parseFloat(t.running_total) || 0).toLocaleString()}</td><td className="px-4 py-2.5 text-slate-600">{t.warehouse_name || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.source ? t.source.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.received_by || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.added_by || '-'}</td><td className="px-4 py-2.5 text-slate-500 max-w-[200px] truncate">{t.notes || '-'}</td></tr>
                       ))}
                     </tbody>
@@ -306,7 +404,7 @@ export default function Materials() {
                       {['Date', 'Qty Out', 'Remaining', 'Warehouse', 'Project', 'Location', 'Driver', 'Vehicle', 'Issued By', 'Notes'].map(h => <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}
                     </tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {stockOutTx.map(t => (
+                      {stockOutTx?.map(t => (
                         <tr key={t.id} className="hover:bg-slate-50"><td className="px-4 py-2.5 text-xs text-slate-500">{t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td><td className="px-4 py-2.5 font-semibold text-amber-600">-{(parseFloat(t.quantity) || 0).toLocaleString()}</td><td className="px-4 py-2.5 font-medium">{(parseFloat(t.running_total) || 0).toLocaleString()}</td><td className="px-4 py-2.5 text-slate-600">{t.warehouse_name || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.project_name || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.location || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.driver_name || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.vehicle_number || '-'}</td><td className="px-4 py-2.5 text-slate-600">{t.added_by || '-'}</td><td className="px-4 py-2.5 text-slate-500 max-w-[150px] truncate">{t.notes || '-'}</td></tr>
                       ))}
                     </tbody>
@@ -327,13 +425,13 @@ export default function Materials() {
           <Input label="Quantity *" type="number" step="0.01" value={stockInQty.quantity} onChange={e => setStockInQty({ ...stockInQty, quantity: e.target.value })} placeholder="Enter quantity" />
           <Select label="Warehouse / Location *" value={stockInQty.warehouse_id} onChange={e => setStockInQty({ ...stockInQty, warehouse_id: e.target.value })}>
             <option value="">Select warehouse</option>
-            {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}{w.location ? ` - ${w.location}` : ''}</option>)}
+            {warehouses?.map(w => <option key={w.id} value={w.id}>{w.name}{w.location ? ` - ${w.location}` : ''}</option>)}
           </Select>
           <Select label="Linked PO (optional)" value={stockInQty.po_id} onChange={e => setStockInQty({ ...stockInQty, po_id: e.target.value })}>
             <option value="">No PO link</option>
-            {availablePos.filter(p => p.status === 'approved' || p.status === 'partial_received').map(p => (
+            {availablePos?.filter(p => p.status === 'approved' || p.status === 'partial_received').map(p => (
               <option key={p.id} value={p.id}>{p.po_number} - {p.vendor_name} ({formatPKR(p.total_amount)})</option>
-            ))}
+            )) || []}
           </Select>
           <Select label="Source *" value={stockInQty.source} onChange={e => setStockInQty({ ...stockInQty, source: e.target.value })}>
             <option value="">Select source</option>
@@ -359,13 +457,13 @@ export default function Materials() {
             <span className="text-amber-800">Current: <strong>{parseFloat(stockOutModal.material?.quantity || 0).toLocaleString()} {stockOutModal.material?.unit}</strong></span>
           </div>
           <Input label="Quantity *" type="number" step="0.01" value={stockOutForm.quantity} onChange={e => setStockOutForm({ ...stockOutForm, quantity: e.target.value })} placeholder="Enter quantity" />
-          <Select label="From Warehouse *" value={stockOutForm.warehouse_id} onChange={e => setStockOutForm({ ...stockOutForm, warehouse_id: e.target.value })}>
+          <Select label="Warehouse / Location *" value={stockOutForm.warehouse_id} onChange={e => setStockOutForm({ ...stockOutForm, warehouse_id: e.target.value })}>
             <option value="">Select warehouse</option>
-            {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}{w.location ? ` - ${w.location}` : ''}</option>)}
+            {warehouses?.map(w => <option key={w.id} value={w.id}>{w.name}{w.location ? ` - ${w.location}` : ''}</option>)}
           </Select>
           <Select label="Project *" value={stockOutForm.project_id} onChange={e => setStockOutForm({ ...stockOutForm, project_id: e.target.value })}>
             <option value="">Select project</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}{p.location ? ` - ${p.location}` : ''}</option>)}
+            {projects?.map(p => <option key={p.id} value={p.id}>{p.name}{p.location ? ` - ${p.location}` : ''}</option>)}
           </Select>
           <Input label="Destination Location / Site *" value={stockOutForm.location} onChange={e => setStockOutForm({ ...stockOutForm, location: e.target.value })} placeholder="e.g., Site A, Main Store" />
           <div className="grid grid-cols-2 gap-3">
@@ -487,7 +585,7 @@ function MaterialForm({ data, categories, onSave, onCancel }) {
         <Input label="Name *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} error={errors.name} />
         <Select label="Category" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
           <option value="">Select category</option>
-          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
         <Input label="Unit *" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} placeholder="bags, tonnes, pcs" error={errors.unit} />
         <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />

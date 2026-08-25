@@ -65,8 +65,27 @@ router.put('/:id', authenticate, authorize('owner', 'admin'), async (req, res) =
 // Audit logs
 router.get('/audit-logs', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 200');
-    res.json(rows);
+    const { page = 1, limit = 100 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const offset = (pageNum - 1) * limitNum;
+
+    const { rows: countRows } = await pool.query('SELECT COUNT(*) FROM audit_logs');
+    const total = parseInt(countRows[0]?.count || '0');
+
+    const { rows } = await pool.query(
+      'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limitNum, offset]
+    );
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 import { d, add, sub, mul, div, round2, toNumber, gt, gte } from '../utils/decimal'
 import ErrorBoundary from './ErrorBoundary'
+import { useSubmitGuard } from '../hooks/useSubmitGuard'
 
 const CAN_MANAGE = ['owner', 'admin', 'finance']
 const CAN_APPROVE = ['owner', 'admin']
@@ -58,6 +59,12 @@ export default function ProjectFinance({ projectId, projectName }) {
   const [utilDetail, setUtilDetail] = useState(null)
   const [utilFilters, setUtilFilters] = useState({ category: '', from: '', to: '' })
 
+  // Submit guards to prevent double-submission
+  const { isSubmitting: isSaving, guard: saveGuard } = useSubmitGuard()
+  const { isSubmitting: isSubmittingDeletion, guard: deletionGuard } = useSubmitGuard()
+  const { isSubmitting: isApproving, guard: approvalGuard } = useSubmitGuard()
+  const { isSubmitting: isUtilizing, guard: utilizationGuard } = useSubmitGuard()
+
   const canManage = CAN_MANAGE.includes(user?.role)
   const canSeeDeletionRequests = CAN_APPROVE.includes(user?.role)
   const canSeeVendors = user?.role !== 'manager'
@@ -69,7 +76,7 @@ export default function ProjectFinance({ projectId, projectName }) {
   const openUtilDetail = (pc) => {
     setUtilFilters({ category: '', from: '', to: '' })
     api.get(`/projects/${projectId}/finance/petty-cash/${pc.id}/utilizations`)
-      .then(({ data }) => setUtilDetail({ pc, entries: data?.entries || [] }))
+      .then(({ data }) => setUtilDetail({ pc, entries: data?.data?.entries || data?.entries || [] }))
       .catch(err => { console.error(err); toast.error('Failed to load utilization details'); })
   }
 
@@ -82,14 +89,14 @@ export default function ProjectFinance({ projectId, projectName }) {
     const amt = parseFloat(utilForm.amount)
     if (!amt || amt <= 0) return toast.error('Valid amount required')
     if (!utilForm.date) return toast.error('Date required')
-    try {
+    await utilizationGuard(async () => {
       const { data } = await api.post(`/projects/${projectId}/finance/petty-cash/${utilForm.petty_cash_id}/utilizations`, {
         category: utilForm.category, date: utilForm.date, amount: amt, note: utilForm.note, receipt_ref: utilForm.receipt_ref,
       })
       toast.success(`Expense of ${formatPKR(data.amount)} recorded`)
       setUtilModal({ open: false, pc: null })
       load()
-    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record expense') }
+    })
   }
 
 const load = useCallback(() => {
@@ -123,13 +130,13 @@ const load = useCallback(() => {
   useEffect(() => { load() }, [load])
 
   const handleSave = async (type, form) => {
-    try {
+    await saveGuard(async () => {
       const pathMap = { salary: 'salaries', petty_cash: 'petty-cash', vendor_payment: 'vendor-payments', amount_received: 'amount-received' }
       await api.post(`/projects/${projectId}/finance/${pathMap[type]}`, form)
       toast.success(`${TX_LABELS[type]} added`)
       setAddModal(null)
       load()
-    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
+    })
   }
 
   const openDeleteModal = (type, id, label) => {
@@ -139,27 +146,28 @@ const load = useCallback(() => {
 
   const submitDeletion = async () => {
     if (!delReason.trim()) return toast.error('Reason is required')
-    try {
+    await deletionGuard(async () => {
       await api.post(`/projects/${projectId}/finance/deletion-requests`, {
         transaction_type: delModal.type, transaction_id: delModal.id, reason: delReason.trim(),
       })
       toast.success('Deletion request submitted for approval')
       setDelModal({ open: false, type: null, id: null, label: '' })
       load()
-    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to submit request') }
+    })
   }
 
   const handleApproval = async (dr, level, approve) => {
-    try {
+    await approvalGuard(async () => {
       await api.patch(`/projects/${projectId}/finance/deletion-requests/${dr.id}/${level}-approve`, { approve })
       toast.success(approve ? 'Approval recorded' : 'Request rejected')
       load()
-    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to update approval') }
+    })
   }
 
   const chartData = summary ? [
     { name: 'Salaries', value: Math.round(parseFloat(summary.salaries_total) || 0) },
-    { name: 'Petty Cash', value: Math.round(parseFloat(summary.petty_cash_utilized_total) || 0) },
+    { name: 'Petty Cash (Onsite)', value: Math.round(parseFloat(summary.petty_cash_received_onsite || summary.petty_cash_total) || 0) },
+    { name: 'Material Cost', value: Math.round(parseFloat(summary.material_cost_total) || 0) },
     ...(canSeeVendors ? [{ name: 'Vendor Payments', value: Math.round(parseFloat(summary.vendor_payments_total) || 0) }] : []),
   ].filter(d => d.value > 0) : []
 
@@ -200,6 +208,7 @@ const load = useCallback(() => {
                 <StatCard label="Project Cost Value" value={formatPKR(summary?.project_cost_value)} icon={Wallet} color="emerald" />
                 <StatCard label="Amount Received" value={formatPKR(summary?.amount_received_total)} icon={HandCoins} color="teal" />
                 <StatCard label="Actual Cost" value={formatPKR(summary?.actual_cost)} icon={HandCoins} color="blue" />
+                <StatCard label="Material Cost" value={formatPKR(summary?.material_cost_total)} icon={Wallet} color="orange" />
                 <StatCard label="Cash Balance" value={formatPKR(summary?.balance_received)} icon={Wallet} color={(summary?.balance_received || 0) < 0 ? 'red' : 'green'} hint="Amount received minus actual cost" />
                 <StatCard label="Profit / Loss" value={formatPKR(summary?.profit_loss)} icon={TrendingUp} color={(summary?.profit_loss || 0) < 0 ? 'red' : 'green'} hint="Project cost value minus actual cost" />
                 <StatCard label="% Utilized" value={`${summary?.percent_utilized?.toFixed(1) || '0.0'}%`} icon={ClipboardList} color="purple" />
@@ -440,14 +449,14 @@ const load = useCallback(() => {
                           <div className="flex gap-2 pt-1">
                             {dr.admin_approval === 'pending' && (
                               <>
-                                <Button size="sm" onClick={() => handleApproval(dr, 'admin', true)}><ShieldCheck size={13} /> Approve</Button>
-                                <Button size="sm" variant="destructive" onClick={() => handleApproval(dr, 'admin', false)}><ShieldX size={13} /> Reject</Button>
+                                <Button size="sm" onClick={() => handleApproval(dr, 'admin', true)} disabled={isApproving}><ShieldCheck size={13} /> Approve</Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleApproval(dr, 'admin', false)} disabled={isApproving}><ShieldX size={13} /> Reject</Button>
                               </>
                             )}
                             {dr.owner_approval === 'pending' && isOwner && (
                               <>
-                                <Button size="sm" onClick={() => handleApproval(dr, 'owner', true)}><ShieldCheck size={13} /> Final Approve</Button>
-                                <Button size="sm" variant="destructive" onClick={() => handleApproval(dr, 'owner', false)}><ShieldX size={13} /> Final Reject</Button>
+                                <Button size="sm" onClick={() => handleApproval(dr, 'owner', true)} disabled={isApproving}><ShieldCheck size={13} /> Final Approve</Button>
+                                <Button size="sm" variant="destructive" onClick={() => handleApproval(dr, 'owner', false)} disabled={isApproving}><ShieldX size={13} /> Final Reject</Button>
                               </>
                             )}
                           </div>
@@ -494,7 +503,7 @@ const load = useCallback(() => {
           <Input label="Note" value={utilForm.note} onChange={e => setUtilForm({ ...utilForm, note: e.target.value })} placeholder="What was this expense for?" />
           <Input label="Receipt Reference" value={utilForm.receipt_ref} onChange={e => setUtilForm({ ...utilForm, receipt_ref: e.target.value })} placeholder="Optional bill / voucher no." />
           <div className="flex gap-3">
-            <Button onClick={submitUtilization}>Record Expense</Button>
+            <Button onClick={submitUtilization} disabled={isUtilizing}>Record Expense</Button>
             <Button variant="secondary" onClick={() => setUtilModal({ open: false, pc: null })}>Cancel</Button>
           </div>
         </div>
@@ -679,6 +688,7 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
     if (!form.payment_date) errs.payment_date = 'Payment date required'
     if (!form.bank_id) errs.bank_id = 'Bank is required'
     if (Object.keys(errs).length) return setErrors(errs)
+    console.log('Submitting vendor payment:', { ...form, po_id: isContinuous ? form.po_id : undefined, bill_number: isContinuous ? form.bill_number : undefined })
     onSave({ ...form, po_id: isContinuous ? form.po_id : undefined, bill_number: isContinuous ? form.bill_number : undefined })
   }
 
@@ -721,7 +731,7 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
         <Input label="IPC % Complete *" type="number" min="0" max="100" step="0.01" value={form.ipc_percent_complete} onChange={e => setForm({ ...form, ipc_percent_complete: e.target.value })} error={errors.ipc_percent_complete} />
       )}
       <Input label="Payment Date *" type="date" value={form.payment_date} onChange={e => setForm({ ...form, payment_date: e.target.value })} error={errors.payment_date} />
-      <Select label="Bank *" value={form.bank_id} onChange={e => setForm({ ...form, bank_id: e.target.value })} error={errors.bank_id}>
+      <Select label="Bank *" value={form.bank_id} onChange={e => { console.log('Bank select changed:', e.target.value); setForm({ ...form, bank_id: e.target.value }) }} error={errors.bank_id}>
         <option value="">Select bank...</option>
         {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </Select>

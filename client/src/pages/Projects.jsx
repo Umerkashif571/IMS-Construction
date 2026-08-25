@@ -34,8 +34,8 @@ export default function Projects() {
 
   const loadManagers = (projectId) => {
     if (!projectId || !canAssignManagers) return
-    api.get(`/projects/${projectId}/managers`).then(({ data }) => setProjectManagers(data || [])).catch(() => setProjectManagers([]))
-    api.get('/users', { params: { role: 'manager' } }).then(({ data }) => setManagerUsers((data || []).filter(u => u.role === 'manager'))).catch(() => setManagerUsers([]))
+    api.get(`/projects/${projectId}/managers`).then(({ data }) => setProjectManagers(data?.data || data || [])).catch(() => setProjectManagers([]))
+    api.get('/users', { params: { role: 'manager' } }).then(({ data }) => setManagerUsers((data?.data || data || []).filter(u => u.role === 'manager'))).catch(() => setManagerUsers([]))
   }
 
   const assignManager = async () => {
@@ -59,7 +59,7 @@ export default function Projects() {
   const load = (q = '') => {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
-    api.get(`/projects${params}`).then(({ data }) => setProjects(data)).catch(err => { console.error(err); toast.error('Failed to load projects') }).finally(() => setLoading(false))
+    api.get(`/projects${params}`).then(({ data }) => setProjects(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load projects') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load(debouncedSearch) }, [debouncedSearch])

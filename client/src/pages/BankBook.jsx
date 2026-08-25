@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '../context/AuthContext'
 import api from '../api'
-import { Card, CardHeader, CardContent, Button, Modal, Input, EmptyState, Badge, StatCard, LoadingSkeleton } from '../components/ui'
-import { Landmark, Plus, Trash2, ArrowDownLeft, ArrowUpRight, Info } from 'lucide-react'
+import { Modal, Button, Input, Badge, LoadingSkeleton, EmptyState, Card, CardHeader, CardContent, StatCard } from '../components/ui'
+import { Plus, Landmark, ArrowDownLeft, ArrowUpRight, Trash2, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 import { d, add, toNumber } from '../utils/decimal'
+
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' }) : '-')
 
@@ -35,9 +38,10 @@ export default function BankBook() {
   const load = (keepSelection = true) => {
     setLoading(true)
     api.get('/banks').then(({ data }) => {
-      setBanks(data || [])
+      const banksData = data?.data || data || [];
+      setBanks(banksData);
       if (selected && keepSelection) {
-        const still = (data || []).find(b => b.id === selected)
+        const still = banksData.find(b => b.id === selected)
         if (!still) setSelected(null)
       }
     }).catch(err => { console.error(err); toast.error('Failed to load banks') }).finally(() => setLoading(false))
@@ -49,8 +53,12 @@ export default function BankBook() {
     if (!selected) { setLedger([]); setLedgerBank(null); return }
     setLedgerLoading(true)
     api.get(`/banks/${selected}/transactions`).then(({ data }) => {
-      setLedger(data.transactions || [])
-      setLedgerBank(data.bank)
+      // API returns { bank: {...}, transactions: [...] }
+      const ledgerData = Array.isArray(data?.transactions) ? data.transactions : 
+                         (Array.isArray(data?.data?.transactions) ? data.data.transactions : []);
+      const bankData = data?.bank || data?.data?.bank;
+      setLedger(ledgerData);
+      setLedgerBank(bankData);
     }).catch(err => { console.error(err); toast.error('Failed to load ledger') }).finally(() => setLedgerLoading(false))
   }
 
@@ -93,7 +101,7 @@ export default function BankBook() {
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {banks.map(bank => (
+            {safeArray(banks).map(bank => (
               <StatCard
                 key={bank.id}
                 label={bank.name}
@@ -123,7 +131,7 @@ export default function BankBook() {
                         ))}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {ledger.map(t => (
+                        {safeArray(ledger).map(t => (
                           <tr key={t.id} className="hover:bg-slate-50">
                             <td className="px-4 py-2.5 text-slate-500">{fmtDate(t.date)}</td>
                             <td className="px-4 py-2.5 font-medium">{t.payee_name}</td>

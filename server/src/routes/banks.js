@@ -2,7 +2,42 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, addActivity } = require('../db/helpers');
-const { d, add, sub, round2, toNumber, gt } = require('../utils/decimal');
+
+// Pure JS decimal implementation - no external dependency
+class PureDecimal {
+  constructor(v) {
+    if (v === null || v === undefined || v === '') { this.value = 0; return; }
+    try { this.value = parseFloat(v); } catch (e) { this.value = NaN; }
+    if (isNaN(this.value)) this.value = 0;
+  }
+  plus(other) { return new PureDecimal(this.value + other.value); }
+  minus(other) { return new PureDecimal(this.value - other.value); }
+  times(other) { return new PureDecimal(this.value * other.value); }
+  div(other) { return new PureDecimal(this.value / other.value); }
+  toDecimalPlaces(dp) { return new PureDecimal(Math.round(this.value * Math.pow(10, dp)) / Math.pow(10, dp)); }
+  toNumber() { return this.value; }
+  toFixed(dp) { return this.value.toFixed(dp); }
+  equals(other) { return Math.abs(this.value - other.value) < 1e-10; }
+  gt(other) { return this.value > other.value; }
+  gte(other) { return this.value >= other.value; }
+  lt(other) { return this.value < other.value; }
+  lte(other) { return this.value <= other.value; }
+  isNaN() { return isNaN(this.value); }
+}
+
+function d(v) { return new PureDecimal(v); }
+function add(a, b) { return d(a).plus(d(b)); }
+function sub(a, b) { return d(a).minus(d(b)); }
+function mul(a, b) { return d(a).times(d(b)); }
+function div(a, b) { return d(a).div(d(b)); }
+function round2(v) { return d(v).toDecimalPlaces(2); }
+function toNumber(v) { return round2(v).toNumber(); }
+function toFixed(v, dp = 2) { return round2(v).toFixed(dp); }
+function eq(a, b) { return d(a).equals(d(b)); }
+function gt(a, b) { return d(a).gt(d(b)); }
+function gte(a, b) { return d(a).gte(d(b)); }
+function lt(a, b) { return d(a).lt(d(b)); }
+function lte(a, b) { return d(a).lte(d(b)); }
 
 const router = express.Router();
 

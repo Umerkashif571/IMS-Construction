@@ -1,23 +1,92 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package } from 'lucide-react'
+import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package, Wifi, WifiOff, RotateCcw } from 'lucide-react'
 import bannerImg from '../assets/banner-collage.jpg'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import api from '../api'
 import { StatCard, Card, CardHeader, CardContent, LoadingSkeleton, EmptyState } from '../components/ui'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import { useSupabaseChannel, useCoalescedRealtime } from '../hooks/useRealtime'
+import { supabase } from '../lib/supabase'
 
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [realtimeConnected, setRealtimeConnected] = useState(true)
 
-  useEffect(() => {
+  const loadDashboard = useCallback(() => {
     api.get('/dashboard').then(({ data }) => {
-      setData(data)
+      setData(data?.data || data)
       setLoading(false)
     }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load dashboard') })
   }, [])
+
+  useEffect(() => { loadDashboard() }, [loadDashboard])
+
+  const dashboardSubscriptions = useMemo(() => [
+    { table: 'materials', event: '*' },
+    { table: 'stock_movements', event: '*' },
+  ], [])
+
+  useCoalescedRealtime(dashboardSubscriptions, useCallback((payloads) => {
+    console.log('Coalesced realtime updates on dashboard:', payloads.length, 'events')
+    loadDashboard()
+  }, [loadDashboard]), { debounceMs: 500 })
+
+  // Track realtime connection status
+  useSupabaseChannel('dashboard-connection-status', {
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'dashboard-page' },
+    },
+  })
+
+  useEffect(() => {
+    const channel = supabase.channel('connection-monitor-dashboard')
+    channel
+      .on('system', {}, (payload) => {
+        if (payload.type === 'connect') setRealtimeConnected(true)
+        if (payload.type === 'disconnect') setRealtimeConnected(false)
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
+
+  const budgetData = useMemo(() => {
+    const budgets = data?.project_budgets
+    const arr = Array.isArray(budgets) ? budgets : (budgets?.data ? Array.isArray(budgets.data) ? budgets.data : [] : [])
+    return arr.slice(0, 8).map(p => ({
+      name: p.name?.length > 18 ? p.name.slice(0, 18) + '...' : p.name,
+      cost: parseFloat(p.total_material_cost || 0),
+    }))
+  }, [data?.project_budgets])
+
+  const categoryData = useMemo(() => {
+    const categories = data?.category_breakdown
+    const arr = Array.isArray(categories) ? categories : (categories?.data ? Array.isArray(categories.data) ? categories.data : [] : [])
+    return arr.slice(0, 8).map(c => ({
+      name: c.name,
+      value: parseFloat(c.total_value || 0),
+    }))
+  }, [data?.category_breakdown])
+
+  const recentActivity = useMemo(() => {
+    const activity = data?.recent_activity
+    return Array.isArray(activity) ? activity : (activity?.data ? Array.isArray(activity.data) ? activity.data : [] : [])
+  }, [data?.recent_activity])
+
+  const cards = [
+    { label: 'Inventory Value', value: formatPKR(data?.inventory_value), icon: DollarSign, color: 'emerald', to: '/materials' },
+    { label: 'Active Projects', value: data?.active_projects || 0, icon: Building2, color: 'blue', to: '/projects' },
+    { label: 'Vehicles in Use', value: data?.vehicles_active || 0, icon: Truck, color: 'amber', to: '/vehicles' },
+    { label: 'Tools Checked Out', value: data?.tools_checked_out || 0, icon: Wrench, color: 'purple', to: '/tools' },
+    { label: 'Low Stock Alerts', value: data?.low_stock_count || 0, icon: AlertTriangle, color: 'red', to: '/materials?low_stock=true' },
+    { label: 'Maintenance Due', value: data?.maintenance_due_count || 0, icon: Settings, color: 'amber', to: '/tools?maintenance_due=true' },
+  ]
+
+  const COLORS = ['#059669', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316']
 
   if (loading) return (
     <div className="space-y-6">
@@ -33,27 +102,6 @@ export default function Dashboard() {
     </div>
   )
 
-  const cards = [
-    { label: 'Inventory Value', value: formatPKR(data?.inventory_value), icon: DollarSign, color: 'emerald', to: '/materials' },
-    { label: 'Active Projects', value: data?.active_projects || 0, icon: Building2, color: 'blue', to: '/projects' },
-    { label: 'Vehicles in Use', value: data?.vehicles_active || 0, icon: Truck, color: 'amber', to: '/vehicles' },
-    { label: 'Tools Checked Out', value: data?.tools_checked_out || 0, icon: Wrench, color: 'purple', to: '/tools' },
-    { label: 'Low Stock Alerts', value: data?.low_stock_count || 0, icon: AlertTriangle, color: 'red', to: '/materials?low_stock=true' },
-    { label: 'Maintenance Due', value: data?.maintenance_due_count || 0, icon: Settings, color: 'amber', to: '/tools?maintenance_due=true' },
-  ]
-
-  const COLORS = ['#059669', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316']
-
-  const budgetData = (data?.project_budgets || []).slice(0, 8).map(p => ({
-    name: p.name?.length > 18 ? p.name.slice(0, 18) + '...' : p.name,
-    cost: parseFloat(p.total_material_cost || 0),
-  }))
-
-  const categoryData = (data?.category_breakdown || []).slice(0, 8).map(c => ({
-    name: c.name,
-    value: parseFloat(c.total_value || 0),
-  }))
-
   return (
     <div className="space-y-6">
       <div className="w-full h-44 rounded-xl overflow-hidden" style={{ backgroundImage: `url(${bannerImg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
@@ -63,9 +111,17 @@ export default function Dashboard() {
           <h1 className="text-xl font-bold text-slate-800">Dashboard</h1>
           <p className="text-xs text-slate-500 mt-0.5">Enterprise Asset Management Overview</p>
         </div>
-        <span className="text-[11px] text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
-          {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-        </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
+            <span className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+            <span className="text-xs font-medium text-slate-600">
+              {realtimeConnected ? 'Live' : 'Offline'}
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
+            {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </span>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -146,13 +202,13 @@ export default function Dashboard() {
 
       {/* Recent Activity */}
       <Card>
-        <CardHeader title="Recent Activity" action={<span className="text-xs text-slate-400">{data?.recent_activity?.length || 0} entries</span>} />
+        <CardHeader title="Recent Activity" action={<span className="text-xs text-slate-400">{recentActivity.length} entries</span>} />
         <CardContent className="max-h-72 overflow-y-auto">
-          {(data?.recent_activity || []).length === 0 ? (
+          {recentActivity.length === 0 ? (
             <EmptyState icon={Activity} title="No recent activity" text="Activity feed will appear here" />
           ) : (
             <div className="space-y-1">
-              {(data?.recent_activity || []).map(a => (
+              {recentActivity.map(a => (
                 <div key={a.id} className="flex items-start gap-3 py-2.5 border-b border-slate-50 last:border-0">
                   <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-bold flex-shrink-0">
                     {a.user_name?.charAt(0) || '?'}

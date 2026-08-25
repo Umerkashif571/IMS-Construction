@@ -17,7 +17,11 @@ function isValidPositiveNumber(val) {
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { search, category, warehouse, low_stock } = req.query;
+    const { search, category, warehouse, low_stock, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
     let sql = `SELECT m.*, c.name as category_name, v.name as supplier_name, w.name as warehouse_name
                FROM materials m LEFT JOIN categories c ON m.category_id = c.id
                LEFT JOIN vendors v ON m.supplier_id = v.id
@@ -29,9 +33,25 @@ router.get('/', authenticate, async (req, res) => {
     if (category) { sql += ` AND m.category_id = $${idx}`; params.push(category); idx++; }
     if (warehouse) { sql += ` AND m.warehouse_id = $${idx}`; params.push(warehouse); idx++; }
     if (low_stock === 'true') { sql += ` AND m.quantity <= m.reorder_level`; }
-    sql += ' ORDER BY m.name ASC';
+
+    // Count total for pagination metadata
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY m.name ASC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
     const { rows } = await pool.query(sql, params);
-    res.json(rows);
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -292,17 +312,50 @@ router.post('/:id/stock-out', authenticate, authorize('owner', 'admin', 'store_m
 // Get all transactions for a material (both in/out)
 router.get('/:id/transactions', authenticate, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT t.*, p.name as project_name, w.name as warehouse_name
-       FROM material_transactions t
-       LEFT JOIN projects p ON t.project_id = p.id
-       LEFT JOIN warehouses w ON t.warehouse_id = w.id
-       WHERE t.material_id = $1
-       ORDER BY t.created_at DESC
-       LIMIT 500`,
-      [req.params.id]
-    );
-    res.json(rows);
+    const { from, to, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    let sql = `
+      SELECT t.*, p.name as project_name, w.name as warehouse_name
+      FROM material_transactions t
+      LEFT JOIN projects p ON t.project_id = p.id
+      LEFT JOIN warehouses w ON t.warehouse_id = w.id
+      WHERE t.material_id = $1
+    `;
+    const params = [req.params.id];
+    let idx = 2;
+
+    if (from) {
+      sql += ` AND t.created_at >= $${idx}`;
+      params.push(from);
+      idx++;
+    }
+    if (to) {
+      sql += ` AND t.created_at <= $${idx}`;
+      params.push(to + 'T23:59:59.999Z');
+      idx++;
+    }
+
+    // Count total
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY t.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
+    const { rows } = await pool.query(sql, params);
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -404,11 +457,31 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
 
 router.get('/:id/movements', authenticate, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT * FROM stock_movements WHERE material_id=$1 ORDER BY created_at DESC LIMIT 100',
+    const { page = 1, limit = 100 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const offset = (pageNum - 1) * limitNum;
+
+    // Count total
+    const [{ count }] = await pool.query(
+      'SELECT COUNT(*) FROM stock_movements WHERE material_id=$1',
       [req.params.id]
     );
-    res.json(rows);
+    const total = parseInt(count);
+
+    const { rows } = await pool.query(
+      'SELECT * FROM stock_movements WHERE material_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+      [req.params.id, limitNum, offset]
+    );
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

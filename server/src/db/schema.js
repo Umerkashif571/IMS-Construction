@@ -5,6 +5,7 @@ async function createSchema(pool = require('./pool')) {
 
     // Extensions
     await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
+    await client.query(`CREATE EXTENSION IF NOT EXISTS "pg_trgm"`);
 
     // Users & Auth
     await client.query(`
@@ -725,6 +726,9 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_materials_supplier_id ON materials(supplier_id);
       CREATE INDEX IF NOT EXISTS idx_materials_warehouse_id ON materials(warehouse_id);
       CREATE INDEX IF NOT EXISTS idx_materials_is_active ON materials(is_active);
+      CREATE INDEX IF NOT EXISTS idx_materials_name_sku ON materials(name, sku);
+      CREATE INDEX IF NOT EXISTS idx_materials_name_trgm ON materials USING gin (name gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_materials_sku_trgm ON materials USING gin (sku gin_trgm_ops);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_material_id ON stock_movements(material_id);
       CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_vehicles_assigned_project_id ON vehicles(assigned_project_id);
@@ -742,16 +746,22 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_purchase_orders_vendor_id ON purchase_orders(vendor_id);
       CREATE INDEX IF NOT EXISTS idx_purchase_orders_project_id ON purchase_orders(project_id);
       CREATE INDEX IF NOT EXISTS idx_purchase_orders_status ON purchase_orders(status);
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_vendor_status ON purchase_orders(vendor_id, status);
+      CREATE INDEX IF NOT EXISTS idx_purchase_orders_po_number_trgm ON purchase_orders USING gin (po_number gin_trgm_ops);
       CREATE INDEX IF NOT EXISTS idx_po_items_po_id ON purchase_order_items(po_id);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_material_id ON material_transactions(material_id);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_project_id ON material_transactions(project_id);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_created_at ON material_transactions(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type ON material_transactions(project_id, type);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_material_project_type ON material_transactions(material_id, project_id, type);
       CREATE INDEX IF NOT EXISTS idx_gate_passes_material_id ON gate_passes(material_id);
       CREATE INDEX IF NOT EXISTS idx_gate_passes_project_id ON gate_passes(project_id);
       CREATE INDEX IF NOT EXISTS idx_salaries_project_id ON salaries(project_id);
       CREATE INDEX IF NOT EXISTS idx_petty_cash_project_id ON petty_cash(project_id);
+      CREATE INDEX IF NOT EXISTS idx_petty_cash_project_week ON petty_cash(project_id, week_of);
       CREATE INDEX IF NOT EXISTS idx_vendor_payments_project_id ON vendor_payments(project_id);
       CREATE INDEX IF NOT EXISTS idx_vendor_payments_vendor_id ON vendor_payments(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_payments_project_date ON vendor_payments(project_id, payment_date);
       CREATE INDEX IF NOT EXISTS idx_deletion_requests_project_id ON deletion_requests(project_id);
       CREATE INDEX IF NOT EXISTS idx_deletion_requests_final_status ON deletion_requests(final_status);
       CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
@@ -763,11 +773,16 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_bank_transactions_status ON bank_transactions(status);
       CREATE INDEX IF NOT EXISTS idx_amount_received_project_id ON amount_received(project_id);
       CREATE INDEX IF NOT EXISTS idx_amount_received_status ON amount_received(status);
+      CREATE INDEX IF NOT EXISTS idx_amount_received_project_date ON amount_received(project_id, received_date);
       CREATE INDEX IF NOT EXISTS idx_vendor_payments_po_id ON vendor_payments(po_id);
       CREATE INDEX IF NOT EXISTS idx_pcu_petty_cash_id ON petty_cash_utilization(petty_cash_id);
       CREATE INDEX IF NOT EXISTS idx_pcu_category ON petty_cash_utilization(category);
       CREATE INDEX IF NOT EXISTS idx_pcu_date ON petty_cash_utilization(utilization_date);
       CREATE INDEX IF NOT EXISTS idx_pcu_status ON petty_cash_utilization(status);
+      CREATE INDEX IF NOT EXISTS idx_projects_status_created ON projects(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_projects_name_client_trgm ON projects USING gin (name gin_trgm_ops, client gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_vendors_status ON vendors(status);
+      CREATE INDEX IF NOT EXISTS idx_vendors_name_trgm ON vendors USING gin (name gin_trgm_ops);
     `);
 
     // ============ CONSTRAINTS (guarded — skip gracefully if existing data would violate) ============

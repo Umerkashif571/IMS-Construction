@@ -1,9 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../api'
 import { Modal, LoadingSkeleton, EmptyState, Badge, Button } from '../components/ui'
-import { Ticket, Search, Printer, Share2, ArrowLeft, ExternalLink } from 'lucide-react'
+import { Ticket, Search, Printer, Share2, ArrowLeft, ExternalLink, Wifi, WifiOff } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useRealtimeGatePasses, useSupabaseChannel } from '../hooks/useRealtime'
+import { supabase } from '../lib/supabase'
+
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
 export default function GatePass() {
   const { id } = useParams()
@@ -12,25 +16,51 @@ export default function GatePass() {
   const [loading, setLoading] = useState(true)
   const [detailModal, setDetailModal] = useState({ open: false, gp: null })
   const [search, setSearch] = useState('')
+  const [realtimeConnected, setRealtimeConnected] = useState(true)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    api.get('/gatepass').then(({ data }) => {
+      setGatePasses(data?.data || data || [])
+      setLoading(false)
+    }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load gate passes') })
+  }, [])
 
   useEffect(() => {
     if (id) {
       api.get(`/gatepass/${id}`).then(({ data }) => {
-        setDetailModal({ open: true, gp: data })
+        setDetailModal({ open: true, gp: data?.data || data })
         setLoading(false)
       }).catch(err => { console.error(err); setLoading(false); toast.error('Gate pass not found') })
     } else {
       load()
     }
-  }, [id])
+  }, [id, load])
 
-  const load = () => {
-    setLoading(true)
-    api.get('/gatepass').then(({ data }) => {
-      setGatePasses(data || [])
-      setLoading(false)
-    }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load gate passes') })
-  }
+  useRealtimeGatePasses(useCallback((payload) => {
+    console.log('Realtime gate pass:', payload)
+    load()
+  }, [load]))
+
+  // Track realtime connection status
+  useSupabaseChannel('gatepass-connection-status', {
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'gatepass-page' },
+    },
+  })
+
+  useEffect(() => {
+    const channel = supabase.channel('connection-monitor-gatepass')
+    channel
+      .on('system', {}, (payload) => {
+        if (payload.type === 'connect') setRealtimeConnected(true)
+        if (payload.type === 'disconnect') setRealtimeConnected(false)
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
 
   const openDetail = (gp) => {
     if (id) return
@@ -143,6 +173,12 @@ export default function GatePass() {
           <h1 className="text-xl font-bold text-slate-800">Gate Passes</h1>
           <p className="text-xs text-slate-500 mt-0.5">Auto-generated on stock-out transactions</p>
         </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
+          <span className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+          <span className="text-xs font-medium text-slate-600">
+            {realtimeConnected ? 'Live' : 'Offline'}
+          </span>
+        </div>
       </div>
 
       <div className="relative max-w-xs w-full">
@@ -173,7 +209,7 @@ export default function GatePass() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map(gp => (
+                {safeArray(filtered).map(gp => (
                   <tr key={gp.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
                       <span className="font-mono text-xs font-semibold text-amber-600">{gp.gate_pass_no}</span>

@@ -2,48 +2,60 @@ const { d, add, sub, mul, div, round2, toNumber, toFixed, gt, gte, eq, lte } = r
 
 describe('Finance Calculations', () => {
   describe('Summary Calculations', () => {
-    test('actualCost = salaries + pettyCashUtilized + vendorPayments (when full access)', () => {
+    test('actualCost = salaries + pettyCashReceivedOnsite + vendorPayments + materialCost (when full access)', () => {
       const salariesTotal = d(100000);
-      const pettyCashUtilized = d(25000);
+      const pettyCashReceivedOnsite = d(25000);
       const vendorPaymentsTotal = d(500000);
+      const materialCostTotal = d(75000);
       const vendorIncluded = true;
 
-      const actualCost = toNumber(add(add(salariesTotal, pettyCashUtilized), vendorIncluded ? vendorPaymentsTotal : d(0)));
-      expect(actualCost).toBe(625000);
+      const actualCost = toNumber(
+        add(
+          add(add(d(salariesTotal), d(pettyCashReceivedOnsite)), d(materialCostTotal)),
+          vendorIncluded ? vendorPaymentsTotal : d(0)
+        )
+      );
+      expect(actualCost).toBe(700000);
     });
 
-    test('actualCost = salaries + pettyCashUtilized (when PM access, no vendor)', () => {
+    test('actualCost = salaries + pettyCashReceivedOnsite + materialCost (when PM access, no vendor)', () => {
       const salariesTotal = d(100000);
-      const pettyCashUtilized = d(25000);
+      const pettyCashReceivedOnsite = d(25000);
+      const materialCostTotal = d(75000);
       const vendorPaymentsTotal = d(500000);
       const vendorIncluded = false;
 
-      const actualCost = toNumber(add(add(salariesTotal, pettyCashUtilized), vendorIncluded ? vendorPaymentsTotal : d(0)));
-      expect(actualCost).toBe(125000);
+      const actualCost = toNumber(
+        add(
+          add(add(d(salariesTotal), d(pettyCashReceivedOnsite)), d(materialCostTotal)),
+          vendorIncluded ? vendorPaymentsTotal : d(0)
+        )
+      );
+      expect(actualCost).toBe(200000);
     });
 
     test('profitLoss = projectCostValue - actualCost', () => {
       const projectCostValue = d(1000000);
-      const actualCost = d(625000);
+      const actualCost = d(700000);
 
       const profitLoss = toNumber(sub(projectCostValue, actualCost));
-      expect(profitLoss).toBe(375000);
+      expect(profitLoss).toBe(300000);
     });
 
     test('balanceReceived = amountReceivedTotal - actualCost', () => {
       const amountReceivedTotal = d(800000);
-      const actualCost = d(625000);
+      const actualCost = d(700000);
 
       const balanceReceived = toNumber(sub(amountReceivedTotal, actualCost));
-      expect(balanceReceived).toBe(175000);
+      expect(balanceReceived).toBe(100000);
     });
 
     test('percentUtilized = (actualCost / projectCostValue) * 100', () => {
-      const actualCost = d(625000);
+      const actualCost = d(700000);
       const projectCostValue = d(1000000);
 
       const percentUtilized = toNumber(round2(mul(div(actualCost, projectCostValue), d(100))));
-      expect(percentUtilized).toBe(62.5);
+      expect(percentUtilized).toBe(70.0);
     });
 
     test('percentUtilized = 0 when projectCostValue is 0', () => {
@@ -99,6 +111,12 @@ describe('Finance Calculations', () => {
       const sum = utilizations.reduce((s, u) => add(s, u), d(0));
       expect(toNumber(sum)).toBe(100000);
       expect(eq(sum, disbursed)).toBe(true);
+    });
+
+    test('pettyCashReceivedOnsite equals disbursed amount', () => {
+      const pettyCashTotal = d(50000);
+      const pettyCashReceivedOnsite = pettyCashTotal; // amount field = disbursed/received onsite
+      expect(pettyCashReceivedOnsite).toEqual(pettyCashTotal);
     });
   });
 
@@ -173,6 +191,31 @@ describe('Finance Calculations', () => {
 
       const total = receipts.reduce((s, r) => add(s, r), d(0));
       expect(toNumber(total)).toBe(1000000);
+    });
+  });
+
+  describe('Material Cost Calculations', () => {
+    test('materialCost = sum of (quantity * unit_cost) for material_transactions type=out', () => {
+      const transactions = [
+        { quantity: d(100), unit_cost: d(500) }, // 50000
+        { quantity: d(50), unit_cost: d(1000) }, // 50000
+        { quantity: d(200), unit_cost: d(250) }, // 50000
+      ];
+
+      const total = transactions.reduce((s, t) => add(s, mul(t.quantity, t.unit_cost)), d(0));
+      expect(toNumber(total)).toBe(150000);
+    });
+
+    test('materialCost excludes type=in transactions', () => {
+      const transactions = [
+        { type: 'out', quantity: d(100), unit_cost: d(500) }, // 50000
+        { type: 'in', quantity: d(50), unit_cost: d(1000) }, // 50000 (should be excluded)
+      ];
+
+      const total = transactions
+        .filter(t => t.type === 'out')
+        .reduce((s, t) => add(s, mul(t.quantity, t.unit_cost)), d(0));
+      expect(toNumber(total)).toBe(50000);
     });
   });
 });

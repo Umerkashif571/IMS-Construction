@@ -54,7 +54,7 @@ export default function Vendors() {
   const load = (q = '') => {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
-    api.get(`/vendors${params}`).then(({ data }) => setVendors(data)).catch(err => { console.error(err); toast.error('Failed to load vendors') }).finally(() => setLoading(false))
+    api.get(`/vendors${params}`).then(({ data }) => setVendors(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load vendors') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
@@ -65,7 +65,7 @@ export default function Vendors() {
   useEffect(() => {
     if (!poParam) return
     api.get(`/purchase-orders/${poParam}`).then(({ data }) => {
-      setPoDetailModal({ open: true, po: data })
+      setPoDetailModal({ open: true, po: data?.data || data })
     }).catch(err => { console.error(err); toast.error('Failed to load PO from notification') })
   }, [poParam])
 
@@ -88,12 +88,12 @@ export default function Vendors() {
     setPayTypeFilter('')
     try {
       const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendor.id } })
-      setPos(data || [])
+      setPos(data?.data || data || [])
     } catch (err) { console.error(err); toast.error('Failed to load purchase orders'); setPos([]) }
     if (canSeePayments) {
       try {
         const { data } = await api.get('/finance/vendor-overview', { params: { vendor_id: vendor.id } })
-        setOverview(data)
+        setOverview(data?.data || data)
       } catch (err) { console.error(err); toast.error('Failed to load vendor overview') }
     }
   }
@@ -127,7 +127,7 @@ export default function Vendors() {
   const openCreatePo = (vendor) => {
     setCreatePoModal({ open: true, vendor })
     setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
-    api.get('/projects').then(({ data }) => setProjects(data || [])).catch(err => { console.error(err); toast.error('Failed to load sites') })
+    api.get('/projects').then(({ data }) => setProjects(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load sites') })
   }
 
   const handleCreatePO = async () => {

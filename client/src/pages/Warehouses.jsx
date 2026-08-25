@@ -38,9 +38,9 @@ export default function Warehouses() {
       api.get('/projects'),
       api.get('/users')
     ]).then(([wRes, pRes, uRes]) => {
-      setWarehouses(wRes.data)
-      setProjects(pRes.data || [])
-      setUsers(uRes.data || [])
+      setWarehouses(wRes?.data?.data || wRes?.data || [])
+      setProjects(pRes?.data?.data || pRes?.data || [])
+      setUsers(uRes?.data?.data || uRes?.data || [])
     }).catch(err => { console.error(err); toast.error('Failed to load warehouses') }).finally(() => setLoading(false))
   }
 

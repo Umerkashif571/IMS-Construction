@@ -37,7 +37,7 @@ export default function Tools() {
     setLoading(true)
     const params = q ? `?search=${q}` : ''
     Promise.all([api.get(`/tools${params}`), api.get('/warehouses')])
-      .then(([tRes, wRes]) => { setTools(tRes.data); setWarehouses(wRes.data) })
+      .then(([tRes, wRes]) => { setTools(tRes?.data?.data || tRes?.data || []); setWarehouses(wRes?.data?.data || wRes?.data || []) })
       .catch(err => { console.error(err); toast.error('Failed to load tools') })
       .finally(() => setLoading(false))
   }

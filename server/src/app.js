@@ -27,13 +27,65 @@ const app = express();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const isServerless = !!process.env.VERCEL;
+const runMigrations = process.env.RUN_MIGRATIONS === 'true';
+
+// Ensure database schema exists (runs on both server and serverless when enabled)
+// In production, set RUN_MIGRATIONS=true only during controlled deployments
+if (runMigrations && !isProduction) {
+  const { createSchema } = require('./db/schema');
+  createSchema().catch(err => console.error('Schema init failed:', err.message));
+} else if (runMigrations && isProduction) {
+  console.log('RUN_MIGRATIONS enabled in production - running schema initialization');
+  const { createSchema } = require('./db/schema');
+  createSchema().catch(err => console.error('Schema init failed:', err.message));
+} else {
+  console.log('Schema initialization skipped (set RUN_MIGRATIONS=true to enable)');
+}
+
+// Auto-seed production database on first request if users table is empty
+// This ensures the default users are created in Vercel serverless environments
+let seedPromise = null;
+async function ensureSeed() {
+  if (seedPromise) return seedPromise;
+  const seedEnabled = process.env.SEED_ENABLED === 'true';
+  if (!seedEnabled) return;
+  
+  seedPromise = (async () => {
+    try {
+      const pool = require('./db/pool');
+      const { seedDatabase } = require('./db/seed');
+      
+      // Check if users table has any users
+      const { rows } = await pool.query('SELECT COUNT(*) as count FROM users');
+      const userCount = parseInt(rows[0]?.count || '0');
+      
+      if (userCount === 0) {
+        console.log('Users table empty, running seed...');
+        await seedDatabase();
+        console.log('Seed completed successfully');
+      } else {
+        console.log(`Users table has ${userCount} users, skipping seed`);
+      }
+    } catch (err) {
+      console.error('Auto-seed failed:', err.message);
+      seedPromise = null; // Allow retry on next request
+    }
+  })();
+  return seedPromise;
+}
+
+// Middleware to ensure seed runs before auth routes
+app.use('/api/auth', async (req, res, next) => {
+  await ensureSeed();
+  next();
+});
 
 const defaultOrigins = ['http://localhost:3000', 'http://localhost:5000'];
 const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
   : defaultOrigins;
 
-app.use(cors({
+const corsOptions = {
   origin(origin, cb) {
     if (!origin) return cb(null, true);
     if (corsOrigins.includes(origin)) return cb(null, origin);
@@ -45,9 +97,13 @@ app.use(cors({
     return cb(null, false);
   },
   credentials: true,
-}));
+};
+
+app.use(cors(corsOptions));
+if (!isServerless) {
+  app.use(morgan(isProduction ? 'combined' : 'dev'));
+}
 app.use(express.json({ limit: '2mb' }));
-app.use(morgan(isProduction ? 'combined' : 'dev'));
 app.disable('x-powered-by');
 
 // Basic security headers (no external deps)
@@ -90,9 +146,7 @@ app.use('/api/notifications', notificationRoutes);
 // 404 for unknown API routes
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
-// Production frontend serving: client/dist via Express (SPA fallback for client-side routes).
-// Dev mode uses the vite dev server on :3000 — this block is inactive there.
-// On Vercel, static files are served by the CDN, not this function.
+// Production frontend serving
 if (isProduction) {
   const distDir = path.join(__dirname, '..', '..', 'client', 'dist');
   if (fs.existsSync(path.join(distDir, 'index.html'))) {

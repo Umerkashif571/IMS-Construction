@@ -24,15 +24,35 @@ const PO_JOIN = `
 // List all POs with optional filters
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { status, vendor_id, search } = req.query;
+    const { status, vendor_id, search, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
     let sql = `${PO_JOIN} WHERE 1=1`;
     const params = []; let idx = 1;
     if (status) { sql += ` AND po.status = $${idx}`; params.push(status); idx++; }
     if (vendor_id) { sql += ` AND po.vendor_id = $${idx}`; params.push(vendor_id); idx++; }
     if (search) { sql += ` AND (po.po_number ILIKE $${idx} OR v.name ILIKE $${idx})`; params.push(`%${search}%`); idx++; }
-    sql += ' ORDER BY po.created_at DESC';
+
+    // Count total
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY po.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
     const { rows } = await pool.query(sql, params);
-    res.json(rows);
+    res.json({
+      data: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum)
+      }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

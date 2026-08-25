@@ -5,6 +5,8 @@ import { BarChart3, Building2, Truck, Wrench, Settings, Package, Printer, FileSp
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+
 const reportTypes = [
   { key: 'stock-valuation', label: 'Stock Valuation', icon: BarChart3, color: 'border-blue-200 bg-blue-50' },
   { key: 'project-usage', label: 'Project Material Usage', icon: Building2, color: 'border-green-200 bg-green-50' },
@@ -68,7 +70,7 @@ export default function Reports() {
     setLoadingReport(true)
     try {
       const { data: result } = await api.get(`/reports/${key}`)
-      setData(result || [])
+      setData(safeArray(result))
     } catch (err) {
       console.error(err); toast.error('Failed to load report')
       setData([])
@@ -129,7 +131,7 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {data.map((row, idx) => (
+                  {safeArray(data).map((row, idx) => (
                     <tr key={idx} className="hover:bg-gray-50">
                       {cfg.keys.map(k => (
                         <td key={k} className="px-4 py-3 text-gray-600">

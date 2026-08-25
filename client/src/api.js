@@ -2,6 +2,8 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
 
+let isRefreshing = false
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('ims_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -12,9 +14,13 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('ims_token')
-      localStorage.removeItem('ims_user')
-      if (window.location.pathname !== '/login') window.location.href = '/login'
+      // Don't immediately redirect - let the auth context handle it
+      // Only redirect if we're not already on login page and not currently refreshing
+      if (window.location.pathname !== '/login' && !isRefreshing) {
+        localStorage.removeItem('ims_token')
+        localStorage.removeItem('ims_user')
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   }

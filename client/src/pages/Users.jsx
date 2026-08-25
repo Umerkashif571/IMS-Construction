@@ -1,3 +1,5 @@
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
@@ -20,8 +22,11 @@ export default function Users() {
       api.get('/users'),
       api.get('/users/audit-logs')
     ]).then(([uRes, aRes]) => {
-      setUsers(uRes.data || [])
-      setAuditLogs(aRes.data || [])
+      // API returns arrays directly for /users, and { data: [...], pagination } for /audit-logs
+      const usersData = Array.isArray(uRes.data) ? uRes.data : (Array.isArray(uRes.data?.data) ? uRes.data.data : []);
+      const auditData = Array.isArray(aRes.data) ? aRes.data : (Array.isArray(aRes.data?.data) ? aRes.data.data : []);
+      setUsers(usersData);
+      setAuditLogs(auditData);
     }).catch(() => toast.error('Failed to load users'))
       .finally(() => setLoading(false))
   }
@@ -82,7 +87,7 @@ export default function Users() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {users.map(u => (
+                {safeArray(users).map(u => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">{u.email}</td>
                     <td className="px-4 py-3 font-medium">{u.full_name || '-'}</td>
@@ -138,7 +143,7 @@ export default function Users() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {auditLogs.map(log => (
+              {safeArray(auditLogs).map(log => (
                 <tr key={log.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-xs text-gray-500">{log.created_at ? new Date(log.created_at).toLocaleString() : '-'}</td>
                   <td className="px-4 py-2 text-sm">{log.user_name || '-'}</td>
@@ -154,7 +159,7 @@ export default function Users() {
                   <td className="px-4 py-2 text-sm text-gray-500 max-w-xs truncate">{log.description}</td>
                 </tr>
               ))}
-              {auditLogs.length === 0 && <tr><td colSpan={5} className="text-center py-6"><EmptyState icon={Activity} title="No audit logs" text="No audit log entries yet" /></td></tr>}
+              {safeArray(auditLogs).length === 0 && <tr><td colSpan={5} className="text-center py-6"><EmptyState icon={Activity} title="No audit logs" text="No audit log entries yet" /></td></tr>}
             </tbody>
           </table>
         </div>

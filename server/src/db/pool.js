@@ -12,15 +12,17 @@ const pool = process.env.DATABASE_URL
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
       options: '-c search_path=public',
-      // Serverless (Vercel) uses short-lived processes and the Supabase
-      // transaction pooler — a handful of connections per instance lets
-      // Promise.all() batches inside one request run concurrently instead
-      // of serializing on a single connection (4 was verified safe well
-      // under the pooler's 60-connection limit; instances reap lazily).
-      // Long-running local processes tolerate longer idle/connect windows.
-      max: process.env.VERCEL ? 4 : 10,
-      connectionTimeoutMillis: process.env.VERCEL ? 3000 : 8000,
-      idleTimeoutMillis: process.env.VERCEL ? 5000 : 30000,
+      // Serverless (Vercel) + Supabase pooler (port 6543, ap-southeast-2).
+      // Cross-region latency (iad1 -> ap-southeast-2) can be 300-500ms per round-trip.
+      // Cold start needs full TCP+TLS handshake + pooler assignment.
+      // Use single connection per instance, generous timeouts.
+      max: process.env.VERCEL ? 1 : 10,
+      connectionTimeoutMillis: process.env.VERCEL ? 15000 : 8000,
+      idleTimeoutMillis: process.env.VERCEL ? 60000 : 30000,
+      allowExitOnIdle: true,
+      // Disable prepared statements for pooler compatibility
+      statement_timeout: false,
+      query_timeout: false,
     })
   : new Pool({
       user: process.env.PGUSER,

@@ -16,7 +16,7 @@ export default function Backup() {
 
   const load = () => {
     setLoading(true)
-    api.get('/backup/list').then(({ data }) => setBackups(data || [])).catch(err => { console.error(err); toast.error('Failed to load backups') }).finally(() => setLoading(false))
+    api.get('/backup/list').then(({ data }) => setBackups(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load backups') }).finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])

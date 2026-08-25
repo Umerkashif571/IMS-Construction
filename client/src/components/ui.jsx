@@ -224,3 +224,99 @@ export function ConfirmDialog({ isOpen, onClose, onConfirm, title, message }) {
     </div>
   )
 }
+
+export function Pagination({ page, totalPages, onPageChange, showTotal = false, total = 0 }) {
+  if (totalPages <= 1) return null
+
+  const pages = []
+  const maxVisible = 5
+  let start = Math.max(1, page - Math.floor(maxVisible / 2))
+  let end = Math.min(totalPages, start + maxVisible - 1)
+
+  if (end - start + 1 < maxVisible) {
+    start = Math.max(1, end - maxVisible + 1)
+  }
+
+  for (let i = start; i <= end; i++) {
+    pages.push(i)
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200">
+      {showTotal && total > 0 && (
+        <span className="text-xs text-slate-500">Showing {(page - 1) * 50 + 1} to {Math.min(page * 50, total)} of {total} entries</span>
+      )}
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onPageChange(1)}
+          disabled={page === 1}
+          aria-label="First page"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M11 17l-5-5 5-5" />
+            <path d="M18 17l-5-5 5-5" />
+          </svg>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page === 1}
+          aria-label="Previous page"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </Button>
+        {start > 1 && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => onPageChange(1)}>1</Button>
+            {start > 2 && <span className="px-2 text-slate-400">...</span>}
+          </>
+        )}
+        {pages.map(p => (
+          <Button
+            key={p}
+            variant={p === page ? 'primary' : 'ghost'}
+            size="sm"
+            onClick={() => onPageChange(p)}
+            className="min-w-[36px]"
+          >
+            {p}
+          </Button>
+        ))}
+        {end < totalPages && (
+          <>
+            {end < totalPages - 1 && <span className="px-2 text-slate-400">...</span>}
+            <Button variant="ghost" size="sm" onClick={() => onPageChange(totalPages)}>{totalPages}</Button>
+          </>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page === totalPages}
+          aria-label="Next page"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => onPageChange(totalPages)}
+          disabled={page === totalPages}
+          aria-label="Last page"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M13 17l5-5-5-5" />
+            <path d="M6 17l5-5-5-5" />
+          </svg>
+        </Button>
+      </div>
+    </div>
+  )
+}

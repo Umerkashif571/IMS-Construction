@@ -42,9 +42,23 @@ async function notifyRoles(roles, type, title, message = null, link = null, enti
       `SELECT id FROM users WHERE is_active = true AND role = ANY($1)`,
       [roles]
     );
-    for (const u of rows) {
-      await createNotification(u.id, type, title, message, link, entityType, entityId);
-    }
+    if (rows.length === 0) return
+
+    // Batch insert notifications in a single query
+    const values = []
+    const params = []
+    rows.forEach((u, i) => {
+      const base = i * 7
+      values.push(
+        `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`
+      )
+      params.push(u.id, type, title, message, link, entityType, entityId)
+    })
+    await pool.query(
+      `INSERT INTO notifications (user_id, type, title, message, link, entity_type, entity_id)
+       VALUES ${values.join(', ')}`,
+      params
+    )
   } catch (err) {
     console.error('notifyRoles error:', err.message);
   }

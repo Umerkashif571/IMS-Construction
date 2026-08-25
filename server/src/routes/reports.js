@@ -9,8 +9,12 @@ const router = express.Router();
 // Stock Valuation Report
 router.get('/stock-valuation', authenticate, async (req, res) => {
   try {
-    const { format } = req.query;
-    const { rows } = await pool.query(`
+    const { format, search, category, low_stock, page = 1, limit = 100 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const offset = (pageNum - 1) * limitNum;
+
+    let sql = `
       SELECT m.name, m.sku, m.unit, m.quantity, m.unit_cost, 
         (m.quantity * m.unit_cost) as total_value,
         m.reorder_level, c.name as category_name, v.name as supplier_name
@@ -18,25 +22,55 @@ router.get('/stock-valuation', authenticate, async (req, res) => {
       LEFT JOIN categories c ON m.category_id=c.id
       LEFT JOIN vendors v ON m.supplier_id=v.id
       WHERE m.is_active=true
-      ORDER BY total_value DESC
-    `);
-    if (format === 'excel') return await exportExcel(res, rows, 'Stock_Valuation', [
-      { header: 'Material', key: 'name' }, { header: 'SKU', key: 'sku' },
-      { header: 'Category', key: 'category_name' }, { header: 'Unit', key: 'unit' },
-      { header: 'Quantity', key: 'quantity' }, { header: 'Unit Cost (PKR)', key: 'unit_cost' },
-      { header: 'Total Value (PKR)', key: 'total_value' }, { header: 'Reorder Level', key: 'reorder_level' }
-    ]);
-    if (format === 'pdf') return exportPdf(res, 'Stock Valuation Report', rows, [
-      'Name', 'SKU', 'Category', 'Unit', 'Qty', 'Unit Cost', 'Total Value'
-    ]);
-    res.json(rows);
+    `;
+    const params = [];
+    let idx = 1;
+    if (search) { sql += ` AND (m.name ILIKE $${idx} OR m.sku ILIKE $${idx})`; params.push(`%${search}%`); idx++; }
+    if (category) { sql += ` AND m.category_id = $${idx}`; params.push(category); idx++; }
+    if (low_stock === 'true') { sql += ` AND m.quantity <= m.reorder_level`; }
+
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY total_value DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
+    const { rows } = await pool.query(sql, params);
+
+    if (format === 'excel') {
+      // For exports, get all data without pagination
+      const exportSql = sql.replace(`LIMIT $${idx} OFFSET $${idx + 1}`, '');
+      const { rows: allRows } = await pool.query(exportSql, params.slice(0, -2));
+      return await exportExcel(res, allRows, 'Stock_Valuation', [
+        { header: 'Material', key: 'name' }, { header: 'SKU', key: 'sku' },
+        { header: 'Category', key: 'category_name' }, { header: 'Unit', key: 'unit' },
+        { header: 'Quantity', key: 'quantity' }, { header: 'Unit Cost (PKR)', key: 'unit_cost' },
+        { header: 'Total Value (PKR)', key: 'total_value' }, { header: 'Reorder Level', key: 'reorder_level' }
+      ]);
+    }
+    if (format === 'pdf') {
+      const exportSql = sql.replace(`LIMIT $${idx} OFFSET $${idx + 1}`, '');
+      const { rows: allRows } = await pool.query(exportSql, params.slice(0, -2));
+      return exportPdf(res, 'Stock Valuation Report', allRows, [
+        'Name', 'SKU', 'Category', 'Unit', 'Qty', 'Unit Cost', 'Total Value'
+      ]);
+    }
+    res.json({
+      data: rows,
+      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
 // Project-wise Material Usage
 router.get('/project-usage', authenticate, async (req, res) => {
   try {
-    const { project_id, format } = req.query;
+    const { project_id, format, page = 1, limit = 100 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const offset = (pageNum - 1) * limitNum;
+
     let sql = `SELECT p.name as project, m.name as entity_name, 'material' as allocation_type,
                       mt.quantity, m.unit, m.unit_cost,
                       (mt.quantity * m.unit_cost) as total_cost,
@@ -47,18 +81,34 @@ router.get('/project-usage', authenticate, async (req, res) => {
                JOIN projects p ON mt.project_id = p.id
                WHERE mt.type = 'out'`;
     const params = [];
-    if (project_id) { sql += ' AND mt.project_id=$1'; params.push(project_id); }
-    sql += ' ORDER BY mt.created_at DESC';
+    let idx = 1;
+    if (project_id) { sql += ` AND mt.project_id = $${idx}`; params.push(project_id); idx++; }
+
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY mt.created_at DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
     const { rows } = await pool.query(sql, params);
-    if (format === 'excel') return exportExcel(res, rows, 'Project_Usage', [
-      { name: 'Project', key: 'project' }, { name: 'Item', key: 'entity_name' },
-      { name: 'Qty', key: 'quantity' }, { name: 'Unit', key: 'unit' },
-      { name: 'Unit Cost', key: 'unit_cost' }, { name: 'Total', key: 'total_cost' },
-      { name: 'Location', key: 'location' }, { name: 'Driver', key: 'driver_name' },
-      { name: 'Vehicle', key: 'vehicle_number' }, { name: 'Date', key: 'created_at' },
-      { name: 'Issued By', key: 'allocated_by' }
-    ]);
-    res.json(rows);
+
+    if (format === 'excel') {
+      const exportSql = sql.replace(`LIMIT $${idx} OFFSET $${idx + 1}`, '');
+      const { rows: allRows } = await pool.query(exportSql, params.slice(0, -2));
+      return exportExcel(res, allRows, 'Project_Usage', [
+        { name: 'Project', key: 'project' }, { name: 'Item', key: 'entity_name' },
+        { name: 'Qty', key: 'quantity' }, { name: 'Unit', key: 'unit' },
+        { name: 'Unit Cost', key: 'unit_cost' }, { name: 'Total', key: 'total_cost' },
+        { name: 'Location', key: 'location' }, { name: 'Driver', key: 'driver_name' },
+        { name: 'Vehicle', key: 'vehicle_number' }, { name: 'Date', key: 'created_at' },
+        { name: 'Issued By', key: 'allocated_by' }
+      ]);
+    }
+    res.json({
+      data: rows,
+      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -146,19 +196,39 @@ router.get('/maintenance-due', authenticate, async (req, res) => {
 // Vendor Purchase History
 router.get('/vendor-purchases', authenticate, async (req, res) => {
   try {
-    const { vendor_id, format } = req.query;
+    const { vendor_id, format, page = 1, limit = 100 } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit) || 100));
+    const offset = (pageNum - 1) * limitNum;
+
     let sql = `SELECT po.po_number, po.order_date, po.total_amount, po.status, po.delivery_status, v.name as vendor
                FROM purchase_orders po JOIN vendors v ON po.vendor_id=v.id WHERE po.status NOT IN ('draft', 'cancelled', 'rejected')`;
     const params = [];
-    if (vendor_id) { sql += ' AND po.vendor_id=$1'; params.push(vendor_id); }
-    sql += ' ORDER BY po.order_date DESC';
+    let idx = 1;
+    if (vendor_id) { sql += ` AND po.vendor_id = $${idx}`; params.push(vendor_id); idx++; }
+
+    const countSql = `SELECT COUNT(*) FROM (${sql}) as filtered`;
+    const { rows: countRows } = await pool.query(countSql, params);
+    const total = parseInt(countRows[0]?.count || '0');
+
+    sql += ` ORDER BY po.order_date DESC LIMIT $${idx} OFFSET $${idx + 1}`;
+    params.push(limitNum, offset);
+
     const { rows } = await pool.query(sql, params);
-    if (format === 'excel') return exportExcel(res, rows, 'Vendor_Purchases', [
-      { name: 'PO Number', key: 'po_number' }, { name: 'Vendor', key: 'vendor' },
-      { name: 'Order Date', key: 'order_date' }, { name: 'Total (PKR)', key: 'total_amount' },
-      { name: 'Status', key: 'status' }, { name: 'Delivery', key: 'delivery_status' }
-    ]);
-    res.json(rows);
+
+    if (format === 'excel') {
+      const exportSql = sql.replace(`LIMIT $${idx} OFFSET $${idx + 1}`, '');
+      const { rows: allRows } = await pool.query(exportSql, params.slice(0, -2));
+      return exportExcel(res, allRows, 'Vendor_Purchases', [
+        { name: 'PO Number', key: 'po_number' }, { name: 'Vendor', key: 'vendor' },
+        { name: 'Order Date', key: 'order_date' }, { name: 'Total (PKR)', key: 'total_amount' },
+        { name: 'Status', key: 'status' }, { name: 'Delivery', key: 'delivery_status' }
+      ]);
+    }
+    res.json({
+      data: rows,
+      pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) }
+    });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

@@ -12,6 +12,26 @@ const MAX_ATTEMPTS = 8;
 const LOCK_MS = 15 * 60 * 1000;
 const attempts = new Map();
 
+// Helper: promise with timeout
+function withTimeout(promise, ms, timeoutError) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(timeoutError), ms))
+  ]);
+}
+
+// Helper: retry with exponential backoff for cold starts
+async function withRetry(fn, retries = 2, baseDelay = 500) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (retries === 0) throw err;
+    const delay = baseDelay * Math.pow(2, 2 - retries);
+    await new Promise(r => setTimeout(r, delay));
+    return withRetry(fn, retries - 1, baseDelay);
+  }
+}
+
 function throttleKey(email, ip) {
   return `${(email || '').toLowerCase().trim()}|${ip}`;
 }
@@ -43,12 +63,31 @@ router.post('/login', async (req, res) => {
   }
   if (isLocked(email, ip)) return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
 
+  console.log('Login attempt:', { email: email.trim().toLowerCase(), ip });
+  
   try {
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = true', [email.trim().toLowerCase()]);
+    console.log('Querying database for user...');
+    const { rows } = await withRetry(async () => {
+      return withTimeout(
+        pool.query('SELECT * FROM users WHERE email = $1 AND is_active = true', [email.trim().toLowerCase()]),
+        15000,
+        new Error('Database query timeout')
+      );
+    }, 2, 1000);
+    console.log('Database query completed, rows:', rows.length);
+    
     if (rows.length === 0) { recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' }); }
 
     const user = rows[0];
-    const valid = await bcrypt.compare(password, user.password_hash);
+    console.log('User found, verifying password...');
+    
+    const valid = await withTimeout(
+      bcrypt.compare(password, user.password_hash),
+      5000,
+      new Error('Password verification timeout')
+    );
+    console.log('Password verification completed, valid:', valid);
+    
     if (!valid) { recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' }); }
 
     recordSuccess(email, ip);
@@ -66,8 +105,10 @@ router.post('/login', async (req, res) => {
       user: { id: user.id, email: user.email, full_name: user.full_name, role: user.role, phone: user.phone }
     });
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Login error:', err?.message || err, err?.stack);
+    const status = err?.message?.includes('timeout') ? 504 : 500;
+    const message = err?.message?.includes('timeout') ? 'Request timeout. Please try again.' : 'Server error';
+    res.status(status).json({ error: message });
   }
 });
 

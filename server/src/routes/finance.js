@@ -2,7 +2,68 @@ const express = require('express');
 const pool = require('../db/pool');
 const { authenticate, authorize } = require('../middleware/auth');
 const { logAudit, addActivity, notifyRoles, createNotification } = require('../db/helpers');
-const { d, add, sub, mul, div, round2, toNumber, gt, gte } = require('../utils/decimal');
+
+// Safe wrapper for non-critical side effects (audit, activity, notifications)
+async function safe(fn, label, ...args) {
+  try {
+    await fn(...args);
+  } catch (err) {
+    console.error(`Side effect ${label} failed:`, err?.message || err);
+  }
+}
+function safeAudit(userId, userName, userRole, action, entityType, entityId, description, changes = null) {
+  return safe(logAudit, 'logAudit', userId, userName, userRole, action, entityType, entityId, description, changes);
+}
+function safeActivity(userName, action, description, entityType, entityId = null) {
+  return safe(addActivity, 'addActivity', userName, action, description, entityType, entityId);
+}
+function safeNotification(userId, type, title, message = null, link = null, entityType = null, entityId = null) {
+  return safe(createNotification, 'createNotification', userId, type, title, message, link, entityType, entityId);
+}
+function safeNotifyRoles(roles, type, title, message = null, link = null, entityType = null, entityId = null) {
+  return safe(notifyRoles, 'notifyRoles', roles, type, title, message, link, entityType, entityId);
+}
+
+// Pure JS decimal implementation - no external dependency
+const DECIMAL_PRECISION = 20;
+const ROUND_HALF_UP = (v) => Math.round(v * 100) / 100; // For 2 decimal places
+
+class PureDecimal {
+  constructor(v) {
+    // Handle already-constructed PureDecimal instances
+    if (v instanceof PureDecimal) { this.value = v.value; return; }
+    if (v === null || v === undefined || v === '') { this.value = 0; return; }
+    try { this.value = parseFloat(v); } catch (e) { this.value = NaN; }
+    if (isNaN(this.value)) this.value = 0;
+  }
+  plus(other) { return new PureDecimal(this.value + d(other).value); }
+  minus(other) { return new PureDecimal(this.value - d(other).value); }
+  times(other) { return new PureDecimal(this.value * d(other).value); }
+  div(other) { return new PureDecimal(this.value / d(other).value); }
+  toDecimalPlaces(dp) { return new PureDecimal(Math.round(this.value * Math.pow(10, dp)) / Math.pow(10, dp)); }
+  toNumber() { return this.value; }
+  toFixed(dp) { return this.value.toFixed(dp); }
+  equals(other) { return Math.abs(this.value - d(other).value) < 1e-10; }
+  gt(other) { return this.value > d(other).value; }
+  gte(other) { return this.value >= d(other).value; }
+  lt(other) { return this.value < d(other).value; }
+  lte(other) { return this.value <= d(other).value; }
+  isNaN() { return isNaN(this.value); }
+}
+
+function d(v) { return v instanceof PureDecimal ? v : new PureDecimal(v); }
+function add(a, b) { return d(a).plus(d(b)); }
+function sub(a, b) { return d(a).minus(d(b)); }
+function mul(a, b) { return d(a).times(d(b)); }
+function div(a, b) { return d(a).div(d(b)); }
+function round2(v) { return d(v).toDecimalPlaces(2); }
+function toNumber(v) { return round2(v).toNumber(); }
+function toFixed(v, dp = 2) { return round2(v).toFixed(dp); }
+function eq(a, b) { return d(a).equals(d(b)); }
+function gt(a, b) { return d(a).gt(d(b)); }
+function gte(a, b) { return d(a).gte(d(b)); }
+function lt(a, b) { return d(a).lt(d(b)); }
+function lte(a, b) { return d(a).lte(d(b)); }
 
 const router = express.Router({ mergeParams: true });
 
@@ -61,7 +122,7 @@ async function assertManagerProjectAccess(projectId, user, res) {
 // PM: limited summary (salaries + petty cash only, no vendor breakdown)
 router.get('/summary', authenticate, async (req, res) => {
   try {
-const isFull = FULL_ACCESS.includes(req.user.role);
+    const isFull = FULL_ACCESS.includes(req.user.role);
     const isPM = PM_ACCESS.includes(req.user.role);
     if (!isFull && !isPM) return res.status(403).json({ error: 'Insufficient permissions' });
     if (!(await assertManagerProjectAccess(req.params.projectId, req.user, res))) return;
@@ -69,40 +130,62 @@ const isFull = FULL_ACCESS.includes(req.user.role);
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    const salaryQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM salaries WHERE project_id=$1 AND status<>'deleted'`,
-      [req.params.projectId]
-    );
-    const pettyQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM petty_cash WHERE project_id=$1 AND status<>'deleted'`,
-      [req.params.projectId]
-    );
-    // "Utilized" = what has actually been spent out of each disbursement
-    // (partial spends over time). Profit/Loss reflects utilized, not disbursed.
-    const pettyUtilQ = await pool.query(
-      `SELECT COALESCE(SUM(pu.amount), 0)::float as total
-       FROM petty_cash_utilization pu
-       JOIN petty_cash p ON p.id = pu.petty_cash_id
-       WHERE p.project_id=$1 AND pu.status<>'deleted' AND p.status<>'deleted'`,
-      [req.params.projectId]
-    );
-    const vendorQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM vendor_payments WHERE project_id=$1 AND status<>'deleted'`,
-      [req.params.projectId]
-    );
-    const receivedQ = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::float as total FROM amount_received WHERE project_id=$1 AND status<>'deleted'`,
-      [req.params.projectId]
-    );
+    // Run all independent aggregation queries in parallel
+    const [
+      salaryQ,
+      pettyQ,
+      pettyUtilQ,
+      vendorQ,
+      receivedQ,
+      materialCostQ
+    ] = await Promise.all([
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::float as total FROM salaries WHERE project_id=$1 AND status<>'deleted'`,
+        [req.params.projectId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::float as total FROM petty_cash WHERE project_id=$1 AND status<>'deleted'`,
+        [req.params.projectId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(pu.amount), 0)::float as total
+         FROM petty_cash_utilization pu
+         JOIN petty_cash p ON p.id = pu.petty_cash_id
+         WHERE p.project_id=$1 AND pu.status<>'deleted' AND p.status<>'deleted'`,
+        [req.params.projectId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::float as total FROM vendor_payments WHERE project_id=$1 AND status<>'deleted'`,
+        [req.params.projectId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0)::float as total FROM amount_received WHERE project_id=$1 AND status<>'deleted'`,
+        [req.params.projectId]
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(mt.quantity * m.unit_cost), 0)::float as total
+         FROM material_transactions mt
+         JOIN materials m ON mt.material_id = m.id
+         WHERE mt.project_id=$1 AND mt.type='out'`,
+        [req.params.projectId]
+      )
+    ]);
 
-const salariesTotal = toNumber(d(salaryQ.rows[0].total));
+    const salariesTotal = toNumber(d(salaryQ.rows[0].total));
     const pettyCashTotal = toNumber(d(pettyQ.rows[0].total));
     const pettyCashUtilized = toNumber(d(pettyUtilQ.rows[0].total));
     const vendorPaymentsTotal = toNumber(d(vendorQ.rows[0].total));
     const amountReceivedTotal = toNumber(d(receivedQ.rows[0].total));
+    const materialCostTotal = toNumber(d(materialCostQ.rows[0].total));
 
     const vendorIncluded = isFull;
-    const actualCost = toNumber(add(add(d(salariesTotal), d(pettyCashUtilized)), vendorIncluded ? d(vendorPaymentsTotal) : d(0)));
+    const pettyCashReceivedOnsite = pettyCashTotal;
+    const actualCost = toNumber(
+      add(
+        add(add(d(salariesTotal), d(pettyCashReceivedOnsite)), d(materialCostTotal)),
+        vendorIncluded ? d(vendorPaymentsTotal) : d(0)
+      )
+    );
     const projectCostValue = toNumber(d(project.project_cost_value));
     const balanceReceived = toNumber(sub(d(amountReceivedTotal), d(actualCost)));
     const profitLoss = toNumber(sub(d(projectCostValue), d(actualCost)));
@@ -118,8 +201,10 @@ const salariesTotal = toNumber(d(salaryQ.rows[0].total));
       salaries_total: salariesTotal,
       petty_cash_total: pettyCashTotal,
       petty_cash_utilized_total: pettyCashUtilized,
+      petty_cash_received_onsite: pettyCashReceivedOnsite,
       petty_cash_remaining: toNumber(round2(sub(d(pettyCashTotal), d(pettyCashUtilized)))),
       petty_cash_utilization_rate: pettyCashTotal > 0 ? toNumber(round2(mul(div(d(pettyCashUtilized), d(pettyCashTotal)), d(100)))) : 0,
+      material_cost_total: materialCostTotal,
     };
     if (vendorIncluded) payload.vendor_payments_total = vendorPaymentsTotal;
 
@@ -157,23 +242,24 @@ router.post('/salaries', authenticate, authorize('owner', 'admin', 'finance'), a
     const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
     if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const client = await pool.connect();
+const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const amtValue = amt.toNumber();
       const { rows } = await client.query(
         `INSERT INTO salaries (project_id, employee_name, amount, month, bank_id, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [req.params.projectId, employee_name, amt, month, bank_id, req.user.id]
+        [req.params.projectId, employee_name, amtValue, month, bank_id, req.user.id]
       );
       // Auto-link: salary paid from the selected bank account
       await client.query(
         `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_out, created_by, source_type, source_ref, source_party)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [bank_id, month, employee_name, amt, req.user.id, 'salary', rows[0].id, employee_name]
+        [bank_id, month, employee_name, amtValue, req.user.id, 'salary', rows[0].id, employee_name]
       );
       await client.query('COMMIT');
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'salary', rows[0].id,
-        `Created salary record: ${employee_name} - PKR ${amt} for ${project.name}`);
-      await addActivity(req.user.full_name, 'created', `Added salary for ${employee_name} on project: ${project.name}`, 'salary', rows[0].id);
+      safeAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'salary', rows[0].id,
+        `Created salary record: ${employee_name} - PKR ${amtValue} for ${project.name}`);
+      safeActivity(req.user.full_name, 'created', `Added salary for ${employee_name} on project: ${project.name}`, 'salary', rows[0].id);
       res.status(201).json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -208,6 +294,7 @@ router.get('/petty-cash', authenticate, async (req, res) => {
 res.json(rows.map(r => ({
       ...r,
       utilized: toNumber(d(r.utilized)),
+      received_onsite: toNumber(d(r.amount)), // amount = disbursed/received onsite
       remaining: toNumber(round2(sub(d(r.amount), d(r.utilized)))),
       utilization_rate: gt(d(r.amount), 0) ? toNumber(round2(mul(div(d(r.utilized), d(r.amount)), d(100)))) : 0,
     })));
@@ -227,23 +314,24 @@ router.post('/petty-cash', authenticate, authorize('owner', 'admin', 'finance'),
     const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
     if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const client = await pool.connect();
+const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const amtValue = amt.toNumber();
       const { rows } = await client.query(
         `INSERT INTO petty_cash (project_id, description, amount, week_of, bank_id, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [req.params.projectId, description, amt, week_of, bank_id, req.user.id]
+        [req.params.projectId, description, amtValue, week_of, bank_id, req.user.id]
       );
       // Auto-link: petty cash spent from the selected bank account
       await client.query(
         `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_out, created_by, source_type, source_ref, source_party)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [bank_id, week_of, description, amt, req.user.id, 'petty_cash', rows[0].id, description]
+        [bank_id, week_of, description, amtValue, req.user.id, 'petty_cash', rows[0].id, description]
       );
       await client.query('COMMIT');
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash', rows[0].id,
-        `Created petty cash record: ${description} - PKR ${amt} on ${project.name}`);
-      await addActivity(req.user.full_name, 'created', `Added petty cash: ${description} on project: ${project.name}`, 'petty_cash', rows[0].id);
+      safeAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash', rows[0].id,
+        `Created petty cash record: ${description} - PKR ${amtValue} on ${project.name}`);
+      safeActivity(req.user.full_name, 'created', `Added petty cash: ${description} on project: ${project.name}`, 'petty_cash', rows[0].id);
       res.status(201).json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -281,7 +369,7 @@ router.get('/petty-cash/utilizations', authenticate, async (req, res) => {
     sql += ' ORDER BY pu.utilization_date DESC, pu.created_at DESC';
     const { rows } = await pool.query(sql, params);
 
-// Running balance per disbursement (chronological), matching the ledger style
+    // Running balance per disbursement (chronological), matching the ledger style
     const byDisbursement = {};
     rows.forEach(r => {
       if (!byDisbursement[r.petty_cash_id] && r.status !== 'deleted') byDisbursement[r.petty_cash_id] = d(0);
@@ -296,8 +384,17 @@ router.get('/petty-cash/utilizations', authenticate, async (req, res) => {
       r.running_remaining = Math.max(0, remaining);
     });
 
+    // Parallel aggregation for total utilized
+    const totalUtilizedQ = await pool.query(
+      `SELECT COALESCE(SUM(pu.amount), 0)::float as total
+       FROM petty_cash_utilization pu
+       JOIN petty_cash p ON p.id = pu.petty_cash_id
+       WHERE p.project_id=$1 AND pu.status<>'deleted' AND p.status<>'deleted'`,
+      [req.params.projectId]
+    );
+
     res.json({
-      total_utilized: toNumber(round2(d(rows.filter(r => r.status !== 'deleted').reduce((s, r) => add(d(s), d(r.amount)), d(0))))),
+      total_utilized: toNumber(round2(d(totalUtilizedQ.rows[0].total))),
       count: rows.length,
       entries: rows || [],
     });
@@ -376,13 +473,13 @@ const { rows: usedRows } = await client.query(
 const { rows } = await client.query(
         `INSERT INTO petty_cash_utilization (petty_cash_id, utilization_date, category, amount, note, receipt_ref, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [req.params.id, useDate, String(category).trim(), amt, note || null, receipt_ref || null, req.user.id]
+        [req.params.id, useDate, String(category).trim(), amt.toNumber(), note || null, receipt_ref || null, req.user.id]
       );
       await client.query('COMMIT');
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash_utilization', rows[0].id,
-        `Added utilization PKR ${amt} (${category}) on petty cash: ${pc[0].description}`);
-      await addActivity(req.user.full_name, 'created',
-        `Added utilization PKR ${amt} (${category}) to petty cash: ${pc[0].description}`, 'petty_cash_utilization', rows[0].id);
+      safeAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'petty_cash_utilization', rows[0].id,
+        `Added utilization PKR ${amt.toNumber()} (${category}) on petty cash: ${pc[0].description}`);
+      safeActivity(req.user.full_name, 'created',
+        `Added utilization PKR ${amt.toNumber()} (${category}) to petty cash: ${pc[0].description}`, 'petty_cash_utilization', rows[0].id);
       res.status(201).json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -414,7 +511,8 @@ router.get('/vendor-payments', authenticate, async (req, res) => {
 
 router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
-    const { vendor_id, payment_type, amount, po_id, bill_number, ipc_percent_complete, payment_date, bank_id } = req.body;
+const { vendor_id, payment_type, amount, po_id, bill_number, ipc_percent_complete, payment_date, bank_id } = req.body;
+    console.log('Vendor payment request body:', req.body);
     if (!vendor_id) return res.status(400).json({ error: 'Vendor required' });
     if (!payment_type || !['fixed_otp', 'continuous', 'ipc'].includes(payment_type))
       return res.status(400).json({ error: 'Valid payment type required' });
@@ -424,9 +522,11 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
     if (!bank_id) return res.status(400).json({ error: 'Bank is required' });
     const project = await projectExists(res, req.params.projectId);
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    const vendorQ = await pool.query('SELECT id, name FROM vendors WHERE id=$1', [vendor_id]);
+const vendorQ = await pool.query('SELECT id, name FROM vendors WHERE id=$1', [vendor_id]);
     if (vendorQ.rows.length === 0) return res.status(400).json({ error: 'Vendor not found' });
+    console.log('Checking bank:', bank_id);
     const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
+    console.log('Bank query result:', bankQ.rows);
     if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
     let ipcPct = null;
@@ -445,11 +545,13 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
     let billNo = null;
     if (payment_type === 'continuous') {
       if (!po_id) return res.status(400).json({ error: 'PO selection required for continuous payments' });
+      console.log('Checking PO:', po_id, 'for vendor:', vendor_id);
       const poQ = await pool.query(
         `SELECT id, po_number, total_amount, status, admin_approval, owner_approval
          FROM purchase_orders WHERE id=$1 AND vendor_id=$2`,
         [po_id, vendor_id]
       );
+      console.log('PO query result:', poQ.rows);
       if (poQ.rows.length === 0) return res.status(400).json({ error: 'Selected PO not found for this vendor' });
       const poRow = poQ.rows[0];
       if (poRow.status === 'cancelled') return res.status(400).json({ error: 'Cannot link payment to a cancelled PO' });
@@ -473,24 +575,25 @@ router.post('/vendor-payments', authenticate, authorize('owner', 'admin', 'finan
       billNo = bill_number || null;
     }
 
-    const client = await pool.connect();
+const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const amtValue = amt.toNumber();
       const { rows } = await client.query(
         `INSERT INTO vendor_payments (project_id, vendor_id, payment_type, amount, po_id, po_number, bill_number, ipc_percent_complete, payment_date, bank_id, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-        [req.params.projectId, vendor_id, payment_type, amt, poId, poNumber, billNo, ipcPct, payment_date, bank_id, req.user.id]
+        [req.params.projectId, vendor_id, payment_type, amtValue, poId, poNumber, billNo, ipcPct, payment_date, bank_id, req.user.id]
       );
       // Auto-link: vendor payment debited from the selected bank account
       await client.query(
         `INSERT INTO bank_transactions (bank_id, date, payee_name, cheque_no, amount_out, created_by, source_type, source_ref, source_party)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [bank_id, payment_date, vendorQ.rows[0].name, billNo || poNumber, amt, req.user.id, 'vendor_payment', rows[0].id, vendorQ.rows[0].name]
+        [bank_id, payment_date, vendorQ.rows[0].name, billNo || poNumber, amtValue, req.user.id, 'vendor_payment', rows[0].id, vendorQ.rows[0].name]
       );
       await client.query('COMMIT');
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'vendor_payment', rows[0].id,
-        `Created vendor payment: ${vendorQ.rows[0].name} - PKR ${amt} on ${project.name}`);
-      await addActivity(req.user.full_name, 'created', `Added vendor payment for ${vendorQ.rows[0].name} on project: ${project.name}`, 'vendor_payment', rows[0].id);
+      safeAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'vendor_payment', rows[0].id,
+        `Created vendor payment: ${vendorQ.rows[0].name} - PKR ${amtValue} on ${project.name}`);
+      safeActivity(req.user.full_name, 'created', `Added vendor payment for ${vendorQ.rows[0].name} on project: ${project.name}`, 'vendor_payment', rows[0].id);
       res.status(201).json({ ...rows[0], vendor_name: vendorQ.rows[0].name });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -532,24 +635,25 @@ router.post('/amount-received', authenticate, authorize('owner', 'admin', 'finan
     const { rows: bankQ } = await pool.query('SELECT id FROM banks WHERE id=$1', [bank_id]);
     if (bankQ.length === 0) return res.status(400).json({ error: 'Bank not found' });
 
-    const client = await pool.connect();
+const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const amtValue = amt.toNumber();
       const { rows } = await client.query(
         `INSERT INTO amount_received (project_id, amount, received_date, description, bank_id, received_from, created_by)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [req.params.projectId, amt, received_date, description || null, bank_id, party, req.user.id]
+        [req.params.projectId, amtValue, received_date, description || null, bank_id, party, req.user.id]
       );
       // Auto-link: amount received credited into the selected bank account
       await client.query(
         `INSERT INTO bank_transactions (bank_id, date, payee_name, amount_in, created_by, source_type, source_ref, source_party)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [bank_id, received_date, party, amt, req.user.id, 'amount_received', rows[0].id, party]
+        [bank_id, received_date, party, amtValue, req.user.id, 'amount_received', rows[0].id, party]
       );
       await client.query('COMMIT');
-      await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'amount_received', rows[0].id,
-        `Created amount received record: PKR ${amt} on ${project.name}`);
-      await addActivity(req.user.full_name, 'created', `Recorded payment received: PKR ${amt} on project: ${project.name}`, 'amount_received', rows[0].id);
+      safeAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'amount_received', rows[0].id,
+        `Created amount received record: PKR ${amtValue} on ${project.name}`);
+      safeActivity(req.user.full_name, 'created', `Recorded payment received: PKR ${amtValue} on project: ${project.name}`, 'amount_received', rows[0].id);
       res.status(201).json(rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
@@ -619,15 +723,15 @@ router.post('/deletion-requests', authenticate, async (req, res) => {
       `UPDATE ${table} SET status='deletion_requested' WHERE id=$1 AND status='active'`,
       [transaction_id]
     );
-    if (rowCount === 0) {
+if (rowCount === 0) {
       await pool.query('DELETE FROM deletion_requests WHERE id=$1', [rows[0].id]);
       return res.status(400).json({ error: 'Transaction is no longer active' });
     }
 
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
+    safeAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
       `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}${reason ? ` - ${reason}` : ''}`);
-    await addActivity(req.user.full_name, 'requested', `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}`, 'deletion_request', rows[0].id);
-    await notifyRoles(APPROVERS, 'deletion_request',
+    safeActivity(req.user.full_name, 'requested', `Deletion requested for ${TX_LABELS[transaction_type]} on project: ${project.name}`, 'deletion_request', rows[0].id);
+    safeNotifyRoles(APPROVERS, 'deletion_request',
       `Deletion requested: ${TX_LABELS[transaction_type]}`,
       `${req.user.full_name} requested deletion of ${TX_LABELS[transaction_type]} on ${project.name}`,
       `/projects?project=${req.params.projectId}&tab=finance`, 'deletion_request', rows[0].id);
@@ -741,18 +845,18 @@ async function applyApproval(req, res, level, projectId = undefined) {
       ]
     );
 
-    await client.query('COMMIT');
+await client.query('COMMIT');
 
     const label = TX_LABELS[dreq.transaction_type] || dreq.transaction_type;
     const actionWord = decision === 'approved' ? 'approved' : 'rejected';
-    await logAudit(req.user.id, req.user.full_name, req.user.role, `${level}_approve`, 'deletion_request', id,
+    safeAudit(req.user.id, req.user.full_name, req.user.role, `${level}_approve`, 'deletion_request', id,
       `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label} (final status: ${finalStatus})`);
-    await addActivity(req.user.full_name, `${level}_approve`, `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label}`, 'deletion_request', id);
+    safeActivity(req.user.full_name, `${level}_approve`, `${level === 'admin' ? 'Admin' : 'Owner'} ${actionWord} deletion of ${label}`, 'deletion_request', id);
     if (finalStatus !== 'pending') {
       const link = dreq.project_id
         ? `/projects?project=${dreq.project_id}&tab=finance`
         : '/bankbook';
-      await createNotification(dreq.requested_by, 'deletion_request',
+      safeNotification(dreq.requested_by, 'deletion_request',
         `Deletion request ${finalStatus}`,
         `Your deletion request for ${label} was ${finalStatus} by ${req.user.full_name}`,
         link, 'deletion_request', id);
@@ -829,15 +933,15 @@ if (tx.length === 0) return res.status(404).json({ error: 'Transaction not found
       `UPDATE bank_transactions SET status='deletion_requested' WHERE id=$1 AND status='active'`,
       [transaction_id]
     );
-    if (rowCount === 0) {
+if (rowCount === 0) {
       await pool.query('DELETE FROM deletion_requests WHERE id=$1', [rows[0].id]);
       return res.status(400).json({ error: 'Transaction is no longer active' });
     }
 
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
+    safeAudit(req.user.id, req.user.full_name, req.user.role, 'requested', 'deletion_request', rows[0].id,
       `Deletion requested for Bank Transaction${reason ? ` - ${reason}` : ''}`);
-    await addActivity(req.user.full_name, 'requested', `Deletion requested for a Bank Transaction`, 'deletion_request', rows[0].id);
-    await notifyRoles(APPROVERS, 'deletion_request',
+    safeActivity(req.user.full_name, 'requested', `Deletion requested for a Bank Transaction`, 'deletion_request', rows[0].id);
+    safeNotifyRoles(APPROVERS, 'deletion_request',
       `Deletion requested: Bank Transaction`,
       `${req.user.full_name} requested deletion of a bank transaction`,
       '/bankbook', 'deletion_request', rows[0].id);
@@ -866,23 +970,25 @@ globalRouter.get('/vendor-overview', authenticate, async (req, res) => {
     const vendorQ = await pool.query('SELECT * FROM vendors WHERE id=$1', [vendor_id]);
     if (vendorQ.rows.length === 0) return res.status(404).json({ error: 'Vendor not found' });
 
-    const pos = await pool.query(
-      `SELECT po.*, p.name as project_name
-       FROM purchase_orders po LEFT JOIN projects p ON po.project_id = p.id
-       WHERE po.vendor_id=$1 ORDER BY po.created_at DESC`,
-      [vendor_id]
-    );
-    const payments = await pool.query(
-      `SELECT vp.*, v.name as vendor_name, p.name as project_name, u.full_name as created_by_name
-       FROM vendor_payments vp
-       LEFT JOIN vendors v ON vp.vendor_id = v.id
-       LEFT JOIN projects p ON vp.project_id = p.id
-       LEFT JOIN users u ON vp.created_by = u.id
-       WHERE vp.vendor_id=$1 ORDER BY vp.payment_date DESC, vp.created_at DESC`,
-      [vendor_id]
-    );
+    const [pos, payments] = await Promise.all([
+      pool.query(
+        `SELECT po.*, p.name as project_name
+         FROM purchase_orders po LEFT JOIN projects p ON po.project_id = p.id
+         WHERE po.vendor_id=$1 ORDER BY po.created_at DESC`,
+        [vendor_id]
+      ),
+      pool.query(
+        `SELECT vp.*, v.name as vendor_name, p.name as project_name, u.full_name as created_by_name
+         FROM vendor_payments vp
+         LEFT JOIN vendors v ON vp.vendor_id = v.id
+         LEFT JOIN projects p ON vp.project_id = p.id
+         LEFT JOIN users u ON vp.created_by = u.id
+         WHERE vp.vendor_id=$1 ORDER BY vp.payment_date DESC, vp.created_at DESC`,
+        [vendor_id]
+      )
+    ]);
 
-const activePos = pos.rows.filter((po) => po.status !== 'cancelled');
+    const activePos = pos.rows.filter((po) => po.status !== 'cancelled');
     const activePayments = payments.rows.filter((vp) => vp.status !== 'deleted');
     const totalPoValue = toNumber(activePos.reduce((sum, po) => add(d(sum), d(po.total_amount)), d(0)));
     const totalPaid = toNumber(activePayments.reduce((sum, vp) => add(d(sum), d(vp.amount)), d(0)));

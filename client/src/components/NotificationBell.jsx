@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Badge, Button } from './ui'
-import { Bell, ShieldCheck, ShieldX, CheckCheck } from 'lucide-react'
+import { Bell, ShieldCheck, ShieldX, CheckCheck, Wifi, WifiOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
+import { useRealtimeNotificationsFixed as useRealtimeNotifications, useSupabaseChannel } from '@/hooks/useRealtimeFixed'
+import { supabase } from '../lib/supabase'
 
 const TX_LABELS = {
   salary: 'Salary',
@@ -59,16 +61,21 @@ export default function NotificationBell() {
   const [unread, setUnread] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
+  const [realtimeConnected, setRealtimeConnected] = useState(true)
   const ref = useRef(null)
 
   const canApprove = ['owner', 'admin'].includes(user?.role)
 
   const loadAlerts = useCallback(() => {
-    api.get('/notifications').then(({ data }) => setAlerts(data || [])).catch(err => console.error(err))
+    api.get('/notifications')
+      .then(({ data }) => setAlerts(data?.data || []))
+      .catch(err => { console.error(err); setAlerts([]); })
   }, [])
 
   const loadUnread = useCallback(() => {
-    api.get('/notifications/unread-count').then(({ data }) => setUnread(data?.count || 0)).catch(err => console.error(err))
+    api.get('/notifications/unread-count')
+      .then(({ data }) => setUnread(data?.count || 0))
+      .catch(err => { console.error(err); setUnread(0); })
   }, [])
 
   const loadRequests = useCallback(() => {
@@ -76,7 +83,7 @@ export default function NotificationBell() {
     setLoading(true)
     setError(false)
     api.get('/finance/deletion-requests').then(({ data }) => {
-      setRequests(data || [])
+      setRequests(data?.data || [])
     }).catch(err => { console.error(err); setError(true) }).finally(() => setLoading(false))
   }, [canApprove])
 
@@ -89,15 +96,32 @@ export default function NotificationBell() {
   // Initial load + refresh when panel opens
   useEffect(() => { loadAll() }, [loadAll])
 
-  // Poll unread count every 15s while the tab is visible; refresh on window focus
+  // Real-time notifications
+  useRealtimeNotifications(user?.id, useCallback((payload) => {
+    console.log('Realtime notification:', payload)
+    loadAlerts()
+    loadUnread()
+  }, [loadAlerts, loadUnread]))
+
+  // Track realtime connection status
+  useSupabaseChannel('notifications-connection-status', {
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'notifications-bell' },
+    },
+  })
+
   useEffect(() => {
-    const tick = () => {
-      if (document.visibilityState === 'visible') { loadUnread(); loadAlerts() }
-    }
-    const id = setInterval(tick, 15000)
-    window.addEventListener('focus', tick)
-    return () => { clearInterval(id); window.removeEventListener('focus', tick) }
-  }, [loadUnread, loadAlerts])
+    const channel = supabase.channel('connection-monitor-notifications')
+    channel
+      .on('system', {}, (payload) => {
+        if (payload.type === 'connect') setRealtimeConnected(true)
+        if (payload.type === 'disconnect') setRealtimeConnected(false)
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -158,6 +182,15 @@ export default function NotificationBell() {
 
       {open && (
         <div data-testid="notification-panel" className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
+          <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+            <span className="text-xs font-medium text-slate-600">Notifications</span>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-white rounded-lg border border-slate-200">
+              <span className={`w-1.5 h-1.5 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className="text-[10px] font-medium text-slate-600">
+                {realtimeConnected ? 'Live' : 'Offline'}
+              </span>
+            </div>
+          </div>
           {canApprove && (
             <div className="flex border-b border-slate-100">
               <button
