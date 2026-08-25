@@ -81,8 +81,12 @@ export default function BankBook() {
     }
   }, { in: 0, out: 0 })
 
+  const [deleting, setDeleting] = useState(false)
+
   const submitDeletion = async () => {
+    if (deleting) return
     if (!delReason.trim()) return toast.error('Reason is required')
+    setDeleting(true)
     try {
       await api.post('/finance/deletion-requests', {
         transaction_type: 'bank_transaction', transaction_id: delTarget.id, reason: delReason.trim(),
@@ -93,6 +97,7 @@ export default function BankBook() {
       loadLedger()
       load()
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to submit request') }
+    finally { setDeleting(false) }
   }
 
   return (
@@ -222,8 +227,8 @@ export default function BankBook() {
               />
             </div>
             <div className="flex gap-3">
-              <Button onClick={submitDeletion}>Submit Request</Button>
-              <Button variant="secondary" onClick={() => setDelTarget(null)}>Cancel</Button>
+              <Button onClick={submitDeletion} disabled={deleting}>{deleting ? 'Submitting...' : 'Submit Request'}</Button>
+              <Button variant="secondary" onClick={() => setDelTarget(null)} disabled={deleting}>Cancel</Button>
             </div>
           </div>
         </Modal>
@@ -235,15 +240,19 @@ export default function BankBook() {
 function BankForm({ onCancel, onDone }) {
   const [form, setForm] = useState({ name: '', account_number: '' })
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
     if (!form.name.trim()) return setError('Bank name required')
+    setSubmitting(true)
     try {
       await api.post('/banks', form)
       toast.success('Bank added')
       onDone()
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to add bank') }
+    finally { setSubmitting(false) }
   }
 
   return (
@@ -251,8 +260,8 @@ function BankForm({ onCancel, onDone }) {
       <Input label="Bank Name *" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} error={error} />
       <Input label="Account Number" value={form.account_number} onChange={e => setForm({ ...form, account_number: e.target.value })} />
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Bank</Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={submitting}>{submitting ? 'Adding...' : 'Add Bank'}</Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Button>
       </div>
     </form>
   )
@@ -263,9 +272,11 @@ function TxForm({ bankId, onCancel, onDone }) {
     date: new Date().toISOString().slice(0, 10), payee_name: '', cheque_no: '', amount_in: '', amount_out: '',
   })
   const [errors, setErrors] = useState({})
+  const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitting) return
     const errs = {}
     if (!form.date) errs.date = 'Date required'
     if (!form.payee_name.trim()) errs.payee_name = 'Payee name required'
@@ -276,6 +287,7 @@ function TxForm({ bankId, onCancel, onDone }) {
     if (!errs.amount_in && !errs.amount_out && inAmt === 0 && outAmt === 0) errs.amount_in = 'Amount in or out required'
     if (!errs.amount_in && !errs.amount_out && inAmt > 0 && outAmt > 0) errs.amount_in = 'Use either amount in or amount out'
     if (Object.keys(errs).length) return setErrors(errs)
+    setSubmitting(true)
     try {
       await api.post(`/banks/${bankId}/transactions`, {
         date: form.date, payee_name: form.payee_name.trim(), cheque_no: form.cheque_no || null,
@@ -284,6 +296,7 @@ function TxForm({ bankId, onCancel, onDone }) {
       toast.success('Transaction added')
       onDone()
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to add transaction') }
+    finally { setSubmitting(false) }
   }
 
   return (
@@ -296,8 +309,8 @@ function TxForm({ bankId, onCancel, onDone }) {
         <Input label="Amount Out" type="number" min="0" step="0.01" value={form.amount_out} onChange={e => setForm({ ...form, amount_out: e.target.value })} error={errors.amount_out} />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Transaction</Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={submitting}>{submitting ? 'Adding...' : 'Add Transaction'}</Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Button>
       </div>
     </form>
   )

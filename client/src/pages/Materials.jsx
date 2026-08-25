@@ -26,9 +26,11 @@ export default function Materials() {
   const [dateFilter, setDateFilter] = useState({ mode: 'all', from: '', to: '' })
   const [stockInModal, setStockInModal] = useState({ open: false, material: null })
   const [stockInQty, setStockInQty] = useState({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' })
+  const [stockInLoading, setStockInLoading] = useState(false)
   const [availablePos, setAvailablePos] = useState([])
   const [stockOutModal, setStockOutModal] = useState({ open: false, material: null })
   const [stockOutForm, setStockOutForm] = useState({ quantity: '', project_id: '', warehouse_id: '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' })
+  const [stockOutLoading, setStockOutLoading] = useState(false)
   const [gpPopup, setGpPopup] = useState({ open: false, gp: null })
   const [realtimeConnected, setRealtimeConnected] = useState(true)
   const [materialsPage, setMaterialsPage] = useState(1)
@@ -181,8 +183,10 @@ export default function Materials() {
   }, [materialParam, openDetail])
 
   const handleStockIn = async () => {
+    if (stockInLoading) return
     if (!stockInQty.quantity || parseFloat(stockInQty.quantity) <= 0) return toast.error('Enter valid quantity')
     if (!stockInQty.warehouse_id) return toast.error('Warehouse is required')
+    setStockInLoading(true)
     try {
       const payload = {
         quantity: parseFloat(stockInQty.quantity),
@@ -201,9 +205,11 @@ export default function Materials() {
       setAvailablePos([])
       load(search)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock in') }
+    finally { setStockInLoading(false) }
   }
 
   const handleStockOut = async () => {
+    if (stockOutLoading) return
     const errs = []
     if (!stockOutForm.quantity || parseFloat(stockOutForm.quantity) <= 0) errs.push('Valid quantity required')
     if (!stockOutForm.project_id) errs.push('Project is required')
@@ -212,6 +218,7 @@ export default function Materials() {
     if (!stockOutForm.driver_name.trim()) errs.push('Driver name is required')
     if (!stockOutForm.vehicle_number.trim()) errs.push('Vehicle number is required')
     if (errs.length) return toast.error(errs.join('. '))
+    setStockOutLoading(true)
     try {
       const { data } = await api.post(`/materials/${stockOutModal.material.id}/stock-out`, { quantity: parseFloat(stockOutForm.quantity), project_id: stockOutForm.project_id, warehouse_id: stockOutForm.warehouse_id, location: stockOutForm.location.trim(), driver_name: stockOutForm.driver_name.trim(), vehicle_number: stockOutForm.vehicle_number.trim(), notes: stockOutForm.notes, transaction_type: stockOutForm.transaction_type || 'project_issue' })
       toast.success('Stock removed successfully')
@@ -223,6 +230,7 @@ export default function Materials() {
         load(search)
       }
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock out') }
+    finally { setStockOutLoading(false) }
   }
 
   const stockInTx = safeArray(detailModal.transactions).filter(t => t.type === 'in')
@@ -446,7 +454,7 @@ export default function Materials() {
             <Input label="Date" type="date" value={stockInQty.date} onChange={e => setStockInQty({ ...stockInQty, date: e.target.value })} />
           </div>
           <Input label="Notes" value={stockInQty.notes} onChange={e => setStockInQty({ ...stockInQty, notes: e.target.value })} placeholder="Optional notes" />
-          <Button onClick={handleStockIn} className="w-full"><ArrowDownToLine size={16} /> Add to Stock</Button>
+          <Button onClick={handleStockIn} className="w-full" disabled={stockInLoading}>{stockInLoading ? 'Adding...' : <><ArrowDownToLine size={16} /> Add to Stock</>}</Button>
         </div>
       </Modal>
 
@@ -471,7 +479,7 @@ export default function Materials() {
             <Input label="Vehicle Number *" value={stockOutForm.vehicle_number} onChange={e => setStockOutForm({ ...stockOutForm, vehicle_number: e.target.value })} placeholder="e.g., LEH-1234" />
           </div>
           <Input label="Notes" value={stockOutForm.notes} onChange={e => setStockOutForm({ ...stockOutForm, notes: e.target.value })} placeholder="Optional notes" />
-          <Button onClick={handleStockOut} className="w-full"><ArrowUpFromLine size={16} /> Remove from Stock</Button>
+          <Button onClick={handleStockOut} className="w-full" disabled={stockOutLoading}>{stockOutLoading ? 'Removing...' : <><ArrowUpFromLine size={16} /> Remove from Stock</>}</Button>
         </div>
       </Modal>
 
@@ -566,16 +574,21 @@ function MaterialForm({ data, categories, onSave, onCancel }) {
     reorder_level: data?.reorder_level || 0, unit_cost: data?.unit_cost || 0, storage_location: data?.storage_location || '',
   })
   const [errors, setErrors] = useState({})
+  const [saving, setSaving] = useState(false)
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
+    if (saving) return
     const errs = {}
     if (!form.sku) errs.sku = 'SKU is required'
     if (!form.name) errs.name = 'Name is required'
     if (!form.unit) errs.unit = 'Unit is required'
     if (Object.keys(errs).length) return setErrors(errs)
     setErrors({})
-    onSave(form)
+    setSaving(true)
+    try {
+      await onSave(form)
+    } finally { setSaving(false) }
   }
 
   return (
@@ -598,8 +611,8 @@ function MaterialForm({ data, categories, onSave, onCancel }) {
         <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">{form.id ? 'Update' : 'Create'}</Button>
-        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Saving...' : (form.id ? 'Update' : 'Create')}</Button>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
       </div>
     </form>
   )
