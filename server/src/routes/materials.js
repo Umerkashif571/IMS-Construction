@@ -490,7 +490,14 @@ router.get('/categories/list', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM categories ORDER BY name');
     res.json(rows);
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) {
+    console.error('Categories list error:', err?.message || err, err?.code || '');
+    if (err?.code === '42P01') {
+      // Table doesn't exist - return empty array instead of 500
+      return res.json([]);
+    }
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 module.exports = router;
