@@ -108,7 +108,7 @@ export default function Reports() {
       </div>
 
       {/* Report Table */}
-      {activeReport && (
+      {activeReport && cfg && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">{reportTypes.find(r => r.key === activeReport)?.label}</h3>
@@ -145,7 +145,7 @@ export default function Reports() {
                       ))}
                     </tr>
                   ))}
-                  {data.length === 0 && (
+                  {safeArray(data).length === 0 && (
                     <tr><td colSpan={cfg.keys.length} className="text-center py-10"><EmptyState icon={BarChart3} title="No data" text="No data available for this report" /></td></tr>
                   )}
                 </tbody>
