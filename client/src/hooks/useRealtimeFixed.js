@@ -9,7 +9,11 @@ function useDebouncedCallback(callback, delay = 300) {
   const debouncedCallback = useCallback((...args) => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => {
-      callbackRef.current(...args)
+      try {
+        callbackRef.current(...args)
+      } catch (e) {
+        console.error('Debounced callback error:', e)
+      }
     }, delay)
   }, [delay])
 
@@ -28,19 +32,36 @@ export function useRealtimeNotificationsFixed(userId, onChange, options = {}) {
   callbackRef.current = onChange
 
   const debouncedOnChange = useDebouncedCallback((payload) => {
-    callbackRef.current(payload)
+    try {
+      callbackRef.current(payload)
+    } catch (e) {
+      console.error('Realtime notification callback error:', e)
+    }
   }, debounceMs)
 
   useEffect(() => {
     if (!userId) return
-    const channel = supabase.channel(`realtime:notifications:${userId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
-        (payload) => debouncedOnChange(payload)
-      )
-      .subscribe()
-    return () => supabase.removeChannel(channel)
+    let channel = null
+    try {
+      channel = supabase.channel(`realtime:notifications:${userId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+          (payload) => debouncedOnChange(payload)
+        )
+        .subscribe()
+    } catch (e) {
+      console.error('Failed to subscribe to notifications:', e)
+    }
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove notification channel:', e)
+        }
+      }
+    }
   }, [userId, debouncedOnChange])
 }
 
@@ -48,16 +69,26 @@ export function useSupabaseChannel(channelName, config) {
   const channelRef = useRef(null)
 
   useEffect(() => {
-    channelRef.current = supabase.channel(channelName, config)
-
-    channelRef.current.subscribe()
+    if (!channelName) return
+    let channel = null
+    try {
+      channel = supabase.channel(channelName, config)
+      channel.subscribe()
+      channelRef.current = channel
+    } catch (e) {
+      console.error('Failed to create supabase channel:', e)
+    }
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove supabase channel:', e)
+        }
       }
     }
-  }, [channelName])
+  }, [channelName, config])
 
   return channelRef.current
 }
@@ -74,34 +105,61 @@ export function useCoalescedRealtime(subscriptions, onChange, options = {}) {
     if (pendingRef.current.size > 0) {
       const payloads = Array.from(pendingRef.current)
       pendingRef.current.clear()
-      callbackRef.current(payloads)
+      try {
+        callbackRef.current(payloads)
+      } catch (e) {
+        console.error('Coalesced realtime flush error:', e)
+      }
     }
   }, [])
 
   const debouncedFlush = useDebouncedCallback(flush, debounceMs)
 
   useEffect(() => {
+    if (!subscriptions || !subscriptions.length) return
     const unsubscribes = subscriptions.map((sub) => {
+      if (!sub || !sub.table) return () => {}
       const { table, event = '*', schema = 'public', filter } = sub
-      const channel = supabase.channel(`coalesced:${table}:${Math.random().toString(36).slice(2)}`)
+      let channel = null
+      try {
+        channel = supabase.channel(`coalesced:${table}:${Math.random().toString(36).slice(2)}`)
 
-      const handlePayload = (payload) => {
-        if (!filter || filter(payload)) {
-          pendingRef.current.add(JSON.stringify(payload))
-          debouncedFlush()
+        const handlePayload = (payload) => {
+          try {
+            if (!filter || filter(payload)) {
+              pendingRef.current.add(JSON.stringify(payload))
+              debouncedFlush()
+            }
+          } catch (e) {
+            console.error('Coalesced realtime payload error:', e)
+          }
         }
+
+        channel.on('postgres_changes', { event, schema, table, ...(filter ? { filter } : {}) }, handlePayload).subscribe()
+      } catch (e) {
+        console.error('Failed to subscribe to coalesced realtime:', e)
       }
 
-      channel.on('postgres_changes', { event, schema, table, ...(filter ? { filter } : {}) }, handlePayload).subscribe()
-
       return () => {
-        supabase.removeChannel(channel)
+        if (channel) {
+          try {
+            supabase.removeChannel(channel)
+          } catch (e) {
+            console.error('Failed to remove coalesced channel:', e)
+          }
+        }
       }
     })
 
     return () => {
-      unsubscribes.forEach(unsub => unsub())
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      try {
+        unsubscribes.forEach(unsub => {
+          try { unsub() } catch (e) { console.error('Unsubscribe error:', e) }
+        })
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      } catch (e) {
+        console.error('Coalesced realtime cleanup error:', e)
+      }
     }
   }, [subscriptions, debouncedFlush])
 }

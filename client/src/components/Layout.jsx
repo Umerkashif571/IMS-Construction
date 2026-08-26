@@ -2,6 +2,7 @@ import { useState, useMemo, memo } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import NotificationBell from './NotificationBell'
+import ErrorBoundary from './ErrorBoundary'
 import logo from '../assets/logo.jpg'
 import footerImg from '../assets/banner-text.jpg'
 import {
@@ -139,7 +140,9 @@ const Header = memo(function Header({ user }) {
         <Menu size={20} />
       </button>
       <div className="flex-1" />
-      <NotificationBell />
+      <ErrorBoundary>
+        <NotificationBell />
+      </ErrorBoundary>
       <div className="h-6 w-px bg-slate-200" />
       <div className="hidden sm:flex items-center gap-2">
         <div className="w-8 h-8 bg-slate-800 rounded-full flex items-center justify-center text-white text-xs font-bold">

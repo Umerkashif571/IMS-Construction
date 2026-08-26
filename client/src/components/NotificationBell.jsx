@@ -6,8 +6,7 @@ import { Badge, Button } from './ui'
 import { Bell, ShieldCheck, ShieldX, CheckCheck, Wifi, WifiOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
-import { useRealtimeNotificationsFixed as useRealtimeNotifications, useSupabaseChannel } from '@/hooks/useRealtimeFixed'
-import { supabase } from '../lib/supabase'
+import { useRealtimeNotificationsFixed as useRealtimeNotifications, useSupabaseChannel } from '../hooks/useRealtimeFixed'
 
 const TX_LABELS = {
   salary: 'Salary',
@@ -166,7 +165,12 @@ export default function NotificationBell() {
     }).catch(err => console.error(err))
   }
 
-  const unreadAlerts = alerts.filter(a => !a.is_read).length
+  const unreadAlerts = (Array.isArray(alerts) ? alerts : []).filter(a => !a?.is_read).length
+  const safeAlerts = Array.isArray(alerts) ? alerts : []
+  const safeRequests = Array.isArray(requests) ? requests : []
+  const safeActionable = safeRequests.filter(r =>
+    r?.admin_approval === 'pending' || (user?.role === 'owner' && r?.owner_approval === 'pending')
+  )
 
   return (
     <div className="relative" ref={ref}>
@@ -203,7 +207,7 @@ export default function NotificationBell() {
                 onClick={() => setTab('requests')}
                 className={`flex-1 px-3 py-2 text-xs font-semibold transition-colors ${tab === 'requests' ? 'text-slate-800 border-b-2 border-slate-800' : 'text-slate-400 hover:text-slate-600'}`}
               >
-                Deletion Requests{actionable.length > 0 ? ` (${actionable.length})` : ''}
+                Deletion Requests{safeActionable.length > 0 ? ` (${safeActionable.length})` : ''}
               </button>
             </div>
           )}
@@ -212,16 +216,16 @@ export default function NotificationBell() {
             <div className="max-h-96 overflow-y-auto divide-y divide-slate-50">
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-slate-800">Notifications</h3>
-                {alerts.length > 0 && (
+                {safeAlerts.length > 0 && (
                   <button onClick={markAll} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-600 transition-colors">
                     <CheckCheck size={12} /> Mark all read
                   </button>
                 )}
               </div>
-              {alerts.length === 0 ? (
+              {safeAlerts.length === 0 ? (
                 <div className="p-4 text-xs text-slate-400">No notifications yet</div>
               ) : (
-                alerts.map(n => (
+                safeAlerts.map(n => (
                   <button
                     key={n.id}
                     onClick={() => handleClickAlert(n)}
@@ -244,17 +248,17 @@ export default function NotificationBell() {
             <div>
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-slate-800">Deletion Requests</h3>
-                <span className="text-[10px] text-slate-400">{requests.length} open</span>
+                <span className="text-[10px] text-slate-400">{safeRequests.length} open</span>
               </div>
               <div className="max-h-96 overflow-y-auto divide-y divide-slate-50">
                 {loading ? (
                   <div className="p-4 text-xs text-slate-400">Loading...</div>
                 ) : error ? (
                   <div className="p-4 text-xs text-red-500">Failed to load deletion requests. <button className="underline" onClick={loadRequests}>Retry</button></div>
-                ) : requests.length === 0 ? (
+                ) : safeRequests.length === 0 ? (
                   <div className="p-4 text-xs text-slate-400">No pending deletion requests</div>
                 ) : (
-                  requests.map(r => (
+                  safeRequests.map(r => (
                     <div key={r.id} className="p-3">
                       <div className="flex items-center justify-between gap-2">
                         <Badge variant="info">{TX_LABELS[r.transaction_type] || r.transaction_type}</Badge>
