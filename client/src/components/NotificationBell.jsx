@@ -115,15 +115,28 @@ export default function NotificationBell() {
   useSupabaseChannel('notifications-connection-status', notificationChannelConfig)
 
   useEffect(() => {
-    const channel = supabase.channel('connection-monitor-notifications')
-    channel
-      .on('system', {}, (payload) => {
-        if (payload.type === 'connect') setRealtimeConnected(true)
-        if (payload.type === 'disconnect') setRealtimeConnected(false)
-      })
-      .subscribe()
+    let channel = null
+    try {
+      channel = supabase.channel('connection-monitor-notifications')
+      channel
+        .on('system', {}, (payload) => {
+          if (payload.type === 'connect') setRealtimeConnected(true)
+          if (payload.type === 'disconnect') setRealtimeConnected(false)
+        })
+        .subscribe()
+    } catch (e) {
+      console.error('Failed to create connection monitor channel:', e)
+    }
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove connection monitor channel:', e)
+        }
+      }
+    }
   }, [])
 
   useEffect(() => {

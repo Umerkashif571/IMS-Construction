@@ -86,15 +86,28 @@ export default function Materials() {
   useSupabaseChannel('materials-connection-status', materialsChannelConfig)
 
   useEffect(() => {
-    const channel = supabase.channel('connection-monitor')
-    channel
-      .on('system', {}, (payload) => {
-        if (payload.type === 'connect') setRealtimeConnected(true)
-        if (payload.type === 'disconnect') setRealtimeConnected(false)
-      })
-      .subscribe()
+    let channel = null
+    try {
+      channel = supabase.channel('connection-monitor')
+      channel
+        .on('system', {}, (payload) => {
+          if (payload.type === 'connect') setRealtimeConnected(true)
+          if (payload.type === 'disconnect') setRealtimeConnected(false)
+        })
+        .subscribe()
+    } catch (e) {
+      console.error('Failed to create materials connection monitor channel:', e)
+    }
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove materials connection monitor channel:', e)
+        }
+      }
+    }
   }, [])
 
   const getDateRange = (mode) => {

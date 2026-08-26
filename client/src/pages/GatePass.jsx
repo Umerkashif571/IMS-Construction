@@ -54,15 +54,28 @@ export default function GatePass() {
   useSupabaseChannel('gatepass-connection-status', gatePassChannelConfig)
 
   useEffect(() => {
-    const channel = supabase.channel('connection-monitor-gatepass')
-    channel
-      .on('system', {}, (payload) => {
-        if (payload.type === 'connect') setRealtimeConnected(true)
-        if (payload.type === 'disconnect') setRealtimeConnected(false)
-      })
-      .subscribe()
+    let channel = null
+    try {
+      channel = supabase.channel('connection-monitor-gatepass')
+      channel
+        .on('system', {}, (payload) => {
+          if (payload.type === 'connect') setRealtimeConnected(true)
+          if (payload.type === 'disconnect') setRealtimeConnected(false)
+        })
+        .subscribe()
+    } catch (e) {
+      console.error('Failed to create gatepass connection monitor channel:', e)
+    }
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove gatepass connection monitor channel:', e)
+        }
+      }
+    }
   }, [])
 
   const openDetail = (gp) => {

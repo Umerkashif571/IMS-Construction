@@ -46,15 +46,28 @@ export default function Dashboard() {
   useSupabaseChannel('dashboard-connection-status', dashboardChannelConfig)
 
   useEffect(() => {
-    const channel = supabase.channel('connection-monitor-dashboard')
-    channel
-      .on('system', {}, (payload) => {
-        if (payload.type === 'connect') setRealtimeConnected(true)
-        if (payload.type === 'disconnect') setRealtimeConnected(false)
-      })
-      .subscribe()
+    let channel = null
+    try {
+      channel = supabase.channel('connection-monitor-dashboard')
+      channel
+        .on('system', {}, (payload) => {
+          if (payload.type === 'connect') setRealtimeConnected(true)
+          if (payload.type === 'disconnect') setRealtimeConnected(false)
+        })
+        .subscribe()
+    } catch (e) {
+      console.error('Failed to create dashboard connection monitor channel:', e)
+    }
 
-    return () => supabase.removeChannel(channel)
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel)
+        } catch (e) {
+          console.error('Failed to remove dashboard connection monitor channel:', e)
+        }
+      }
+    }
   }, [])
 
   const budgetData = useMemo(() => {
