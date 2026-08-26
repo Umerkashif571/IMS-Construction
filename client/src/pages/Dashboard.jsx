@@ -29,18 +29,21 @@ export default function Dashboard() {
     { table: 'stock_movements', event: '*' },
   ], [])
 
+  // Memoize config to prevent channel recreation on every render
+  const dashboardChannelConfig = useMemo(() => ({
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'dashboard-page' },
+    },
+  }), [])
+
   useCoalescedRealtime(dashboardSubscriptions, useCallback((payloads) => {
     console.log('Coalesced realtime updates on dashboard:', payloads.length, 'events')
     loadDashboard()
   }, [loadDashboard]), { debounceMs: 500 })
 
   // Track realtime connection status
-  useSupabaseChannel('dashboard-connection-status', {
-    config: {
-      broadcast: { self: true },
-      presence: { key: 'dashboard-page' },
-    },
-  })
+  useSupabaseChannel('dashboard-connection-status', dashboardChannelConfig)
 
   useEffect(() => {
     const channel = supabase.channel('connection-monitor-dashboard')

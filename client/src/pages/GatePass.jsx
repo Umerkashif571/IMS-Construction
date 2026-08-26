@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../api'
 import { Modal, LoadingSkeleton, EmptyState, Badge, Button } from '../components/ui'
@@ -37,18 +37,21 @@ export default function GatePass() {
     }
   }, [id, load])
 
+  // Memoize config to prevent channel recreation on every render
+  const gatePassChannelConfig = useMemo(() => ({
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'gatepass-page' },
+    },
+  }), [])
+
   useRealtimeGatePasses(useCallback((payload) => {
     console.log('Realtime gate pass:', payload)
     load()
   }, [load]))
 
   // Track realtime connection status
-  useSupabaseChannel('gatepass-connection-status', {
-    config: {
-      broadcast: { self: true },
-      presence: { key: 'gatepass-page' },
-    },
-  })
+  useSupabaseChannel('gatepass-connection-status', gatePassChannelConfig)
 
   useEffect(() => {
     const channel = supabase.channel('connection-monitor-gatepass')

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
@@ -66,6 +66,14 @@ export default function NotificationBell() {
 
   const canApprove = ['owner', 'admin'].includes(user?.role)
 
+  // Memoize config to prevent channel recreation on every render
+  const notificationChannelConfig = useMemo(() => ({
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'notifications-bell' },
+    },
+  }), [])
+
   const loadAlerts = useCallback(() => {
     api.get('/notifications')
       .then(({ data }) => setAlerts(data?.data || []))
@@ -104,12 +112,7 @@ export default function NotificationBell() {
   }, [loadAlerts, loadUnread]))
 
   // Track realtime connection status
-  useSupabaseChannel('notifications-connection-status', {
-    config: {
-      broadcast: { self: true },
-      presence: { key: 'notifications-bell' },
-    },
-  })
+  useSupabaseChannel('notifications-connection-status', notificationChannelConfig)
 
   useEffect(() => {
     const channel = supabase.channel('connection-monitor-notifications')

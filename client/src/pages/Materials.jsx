@@ -48,6 +48,14 @@ export default function Materials() {
     { table: 'material_transactions', event: '*' },
   ], [])
 
+  // Memoize config to prevent channel recreation on every render
+  const materialsChannelConfig = useMemo(() => ({
+    config: {
+      broadcast: { self: true },
+      presence: { key: 'materials-page' },
+    },
+  }), [])
+
   const load = useCallback((page = 1, q = '') => {
     setLoading(true)
     const params = new URLSearchParams()
@@ -75,12 +83,7 @@ export default function Materials() {
   }, [load, search, materialsPage, invalidateCategories, invalidateProjects, invalidateWarehouses]), { debounceMs: 500 })
 
   // Track realtime connection status
-  useSupabaseChannel('materials-connection-status', {
-    config: {
-      broadcast: { self: true },
-      presence: { key: 'materials-page' },
-    },
-  })
+  useSupabaseChannel('materials-connection-status', materialsChannelConfig)
 
   useEffect(() => {
     const channel = supabase.channel('connection-monitor')
