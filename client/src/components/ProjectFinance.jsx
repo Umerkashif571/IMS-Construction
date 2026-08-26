@@ -10,6 +10,8 @@ import { d, add, sub, mul, div, round2, toNumber, gt, gte } from '../utils/decim
 import ErrorBoundary from './ErrorBoundary'
 import { useSubmitGuard } from '../hooks/useSubmitGuard'
 
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+
 const CAN_MANAGE = ['owner', 'admin', 'finance']
 const CAN_APPROVE = ['owner', 'admin']
 
@@ -115,15 +117,15 @@ const load = useCallback(() => {
     promises.push(api.get('/banks'))
     Promise.all(promises).then(results => {
       let i = 0
-      setSummary(results[i++].data)
-      setSalaries(results[i++].data || [])
-      setPettyCash(results[i++].data || [])
-      setUtilizations(results[i++].data || [])
-      setAmountReceived(results[i++].data || [])
-      if (canSeeVendors) setVendorPayments(results[i++].data || [])
-      if (canSeeDeletionRequests) setDeletionRequests(results[i++].data || [])
-      setVendors(results[i].data || [])
-      setBanks(results[i + 1].data || [])
+      setSummary(results[i++]?.data)
+      setSalaries(safeArray(results[i++]?.data))
+      setPettyCash(safeArray(results[i++]?.data))
+      setUtilizations(safeArray(results[i++]?.data))
+      setAmountReceived(safeArray(results[i++]?.data))
+      if (canSeeVendors) setVendorPayments(safeArray(results[i++]?.data))
+      if (canSeeDeletionRequests) setDeletionRequests(safeArray(results[i++]?.data))
+      setVendors(safeArray(results[i].data))
+      setBanks(safeArray(results[i + 1].data))
     }).catch(err => { console.error(err); toast.error('Failed to load finance data') }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
@@ -256,7 +258,7 @@ const load = useCallback(() => {
                       ))}
                     </tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {salaries.map(s => (
+                      {safeArray(salaries).map(s => (
                         <tr key={s.id} className="hover:bg-slate-50">
                           <td className="px-4 py-2.5 font-medium">{s.employee_name}</td>
                           <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(s.amount)}</td>
@@ -303,7 +305,7 @@ const load = useCallback(() => {
                         ))}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {pettyCash.map(p => (
+                        {safeArray(pettyCash).map(p => (
                           <tr key={p.id} className="hover:bg-slate-50">
                             <td className="px-4 py-2.5 font-medium">{p.description}</td>
                             <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
@@ -383,7 +385,7 @@ const load = useCallback(() => {
                       ))}
                     </tr></thead>
                     <tbody className="divide-y divide-slate-100">
-                      {amountReceived.map(ar => (
+                      {safeArray(amountReceived).map(ar => (
                         <tr key={ar.id} className="hover:bg-slate-50">
                           <td className="px-4 py-2.5 text-slate-500">{fmtDate(ar.received_date)}</td>
                           <td className="px-4 py-2.5 font-medium">{ar.description || '-'}</td>

@@ -13,6 +13,8 @@ const statusBadge = (s) => {
   return <Badge variant={map[s] || 'default'}>{s?.replace(/_/g, ' ') || 'Unknown'}</Badge>
 }
 
+const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+
 export default function Projects() {
   const { user } = useAuth()
   const [projects, setProjects] = useState([])
@@ -136,7 +138,7 @@ export default function Projects() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {projects.map(p => (
+              {safeArray(projects).map(p => (
                 <tr key={p.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3"><button onClick={() => openDetail(p)} className="font-medium text-amber-600 hover:text-amber-700 hover:underline text-left flex items-center gap-1">{p.name} <ExternalLink size={12} /></button></td>
                   <td className="px-4 py-3 text-slate-500">{p.client || '-'}</td>
@@ -161,7 +163,7 @@ export default function Projects() {
               ))}
             </tbody>
           </table>
-          {projects.length === 0 && <EmptyState icon={Building2} title="No projects found" text={canEdit ? 'Create your first project' : 'No projects to display'} action={canEdit ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Project</Button> : null} />}
+          {safeArray(projects).length === 0 && <EmptyState icon={Building2} title="No projects found" text={canEdit ? 'Create your first project' : 'No projects to display'} action={canEdit ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Project</Button> : null} />}
         </div>
       )}
 
