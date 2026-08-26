@@ -7,6 +7,7 @@ import { Bell, ShieldCheck, ShieldX, CheckCheck, Wifi, WifiOff } from 'lucide-re
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 import { useRealtimeNotificationsFixed as useRealtimeNotifications, useSupabaseChannel } from '../hooks/useRealtimeFixed'
+import { supabase } from '../lib/supabase'
 
 const TX_LABELS = {
   salary: 'Salary',
