@@ -349,7 +349,7 @@ const load = useCallback(() => {
                         ))}
                       </tr></thead>
                       <tbody className="divide-y divide-slate-100">
-                        {vendorPayments.map(vp => (
+                        {safeArray(vendorPayments).map(vp => (
                           <tr key={vp.id} className="hover:bg-slate-50">
                             <td className="px-4 py-2.5 font-medium">{vp.vendor_name || '-'}</td>
                             <td className="px-4 py-2.5 text-slate-500">{vp.payment_type?.replace(/_/g, ' ')}</td>
