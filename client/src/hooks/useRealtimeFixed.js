@@ -10,7 +10,8 @@ function useDebouncedCallback(callback, delay = 300) {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => {
       try {
-        callbackRef.current(...args)
+        const fn = callbackRef.current
+        if (typeof fn === 'function') fn(...args)
       } catch (e) {
         console.error('Debounced callback error:', e)
       }
@@ -33,7 +34,8 @@ export function useRealtimeNotificationsFixed(userId, onChange, options = {}) {
 
   const debouncedOnChange = useDebouncedCallback((payload) => {
     try {
-      callbackRef.current(payload)
+      const fn = callbackRef.current
+      if (typeof fn === 'function') fn(payload)
     } catch (e) {
       console.error('Realtime notification callback error:', e)
     }
@@ -72,7 +74,8 @@ export function useSupabaseChannel(channelName, config) {
     if (!channelName) return
     let channel = null
     try {
-      channel = supabase.channel(channelName, config)
+      const cfg = (config && typeof config === 'object') ? config : {}
+      channel = supabase.channel(channelName, cfg)
       channel.subscribe()
       channelRef.current = channel
     } catch (e) {
@@ -102,21 +105,22 @@ export function useCoalescedRealtime(subscriptions, onChange, options = {}) {
   const timeoutRef = useRef(null)
 
   const flush = useCallback(() => {
-    if (pendingRef.current.size > 0) {
-      const payloads = Array.from(pendingRef.current)
-      pendingRef.current.clear()
-      try {
-        callbackRef.current(payloads)
-      } catch (e) {
-        console.error('Coalesced realtime flush error:', e)
+    try {
+      if (pendingRef.current.size > 0) {
+        const payloads = Array.from(pendingRef.current)
+        pendingRef.current.clear()
+        const fn = callbackRef.current
+        if (typeof fn === 'function') fn(payloads)
       }
+    } catch (e) {
+      console.error('Coalesced realtime flush error:', e)
     }
   }, [])
 
   const debouncedFlush = useDebouncedCallback(flush, debounceMs)
 
   useEffect(() => {
-    if (!subscriptions || !subscriptions.length) return
+    if (!Array.isArray(subscriptions) || !subscriptions.length) return
     const unsubscribes = subscriptions.map((sub) => {
       if (!sub || !sub.table) return () => {}
       const { table, event = '*', schema = 'public', filter } = sub
@@ -153,9 +157,11 @@ export function useCoalescedRealtime(subscriptions, onChange, options = {}) {
 
     return () => {
       try {
-        unsubscribes.forEach(unsub => {
-          try { unsub() } catch (e) { console.error('Unsubscribe error:', e) }
-        })
+        if (Array.isArray(unsubscribes)) {
+          unsubscribes.forEach(unsub => {
+            try { typeof unsub === 'function' && unsub() } catch (e) { console.error('Unsubscribe error:', e) }
+          })
+        }
         if (timeoutRef.current) clearTimeout(timeoutRef.current)
       } catch (e) {
         console.error('Coalesced realtime cleanup error:', e)
