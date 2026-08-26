@@ -27,7 +27,7 @@ const app = express();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const isServerless = !!process.env.VERCEL;
-const runMigrations = process.env.RUN_MIGRATIONS === 'true';
+const runMigrations = process.env.RUN_MIGRATIONS !== 'false';
 
 // Ensure database schema exists (runs on both server and serverless when enabled)
 // In production, set RUN_MIGRATIONS=true only during controlled deployments
@@ -74,8 +74,8 @@ async function ensureSeed() {
   return seedPromise;
 }
 
-// Middleware to ensure seed runs before auth routes
-app.use('/api/auth', async (req, res, next) => {
+// Middleware to ensure seed runs before any API route
+app.use('/api', async (req, res, next) => {
   await ensureSeed();
   next();
 });
