@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import api, { downloadFile } from '../api'
 import { Button, LoadingSkeleton, EmptyState } from '../components/ui'
 import { BarChart3, Building2, Truck, Wrench, Settings, Package, Printer, FileSpreadsheet, FileText } from 'lucide-react'
@@ -33,6 +33,7 @@ export default function Reports() {
   const [activeReport, setActiveReport] = useState(null)
   const [data, setData] = useState([])
   const [loadingReport, setLoadingReport] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!document.getElementById(printStyleId)) {
@@ -68,18 +69,24 @@ export default function Reports() {
   const loadReport = async (key) => {
     setActiveReport(key)
     setLoadingReport(true)
+    setError(null)
     try {
       const { data: result } = await api.get(`/reports/${key}`)
       setData(safeArray(result))
     } catch (err) {
       console.error(err); toast.error('Failed to load report')
       setData([])
+      setError(err)
     } finally {
       setLoadingReport(false)
     }
   }
 
-  const cfg = activeReport ? tableConfig[activeReport] : null
+  // Memoize config to prevent re-renders
+  const cfg = useMemo(() => activeReport ? tableConfig[activeReport] : null, [activeReport])
+
+  // Only render table when we have valid config
+  const canRenderTable = cfg && !loadingReport
 
   return (
     <div className="space-y-6">
@@ -108,7 +115,7 @@ export default function Reports() {
       </div>
 
       {/* Report Table */}
-      {activeReport && cfg && (
+      {activeReport && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">{reportTypes.find(r => r.key === activeReport)?.label}</h3>
@@ -120,7 +127,11 @@ export default function Reports() {
           </div>
           {loadingReport ? (
             <div className="no-print"><LoadingSkeleton rows={5} cols={cfg?.keys?.length ?? 4} /></div>
-          ) : (
+          ) : error ? (
+            <div className="p-4 text-center text-red-500">
+              Failed to load report. <Button variant="secondary" size="sm" onClick={() => loadReport(activeReport)}>Retry</Button>
+            </div>
+          ) : canRenderTable ? (
             <div className="print-area">
               <h2 className="hidden print:block text-lg font-bold mb-2">{reportTypes.find(r => r.key === activeReport)?.label}</h2>
               <div className="overflow-x-auto">
@@ -146,12 +157,14 @@ export default function Reports() {
                     </tr>
                   ))}
                   {safeArray(data).length === 0 && (
-                    <tr><td colSpan={cfg?.keys?.length ?? 4} className="text-center py-10"><EmptyState icon={BarChart3} title="No data" text="No data available for this report" /></td></tr>
+                    <tr><td colSpan={cfg.keys.length} className="text-center py-10"><EmptyState icon={BarChart3} title="No data" text="No data available for this report" /></td></tr>
                   )}
                 </tbody>
               </table>
             </div>
             </div>
+          ) : (
+            <div className="p-4 text-center text-gray-500">Select a report to view data</div>
           )}
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, Button, Input, Badge, LoadingSkeleton, EmptyState, Card, CardHeader, CardContent, StatCard } from '../components/ui'
@@ -35,7 +35,7 @@ export default function BankBook() {
   const [delTarget, setDelTarget] = useState(null)
   const [delReason, setDelReason] = useState('')
 
-  const load = (keepSelection = true) => {
+  const load = useCallback((keepSelection = true) => {
     setLoading(true)
     api.get('/banks').then(({ data }) => {
       const banksData = data?.data || data || [];
@@ -45,11 +45,11 @@ export default function BankBook() {
         if (!still) setSelected(null)
       }
     }).catch(err => { console.error(err); toast.error('Failed to load banks') }).finally(() => setLoading(false))
-  }
+  }, [selected])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
-  const loadLedger = () => {
+  const loadLedger = useCallback(() => {
     if (!selected) { setLedger([]); setLedgerBank(null); return }
     setLedgerLoading(true)
     api.get(`/banks/${selected}/transactions`).then(({ data }) => {
@@ -59,27 +59,30 @@ export default function BankBook() {
       const bankData = data?.bank || data?.data?.bank;
       setLedger(ledgerData);
       setLedgerBank(bankData);
-    }).catch(err => { console.error(err); toast.error('Failed to load ledger'); setLedger([]) }).finally(() => setLedgerLoading(false))
-  }
+    }).catch(err => { console.error(err); toast.error('Failed to load ledger'); setLedger([]); setLedgerBank(null) }).finally(() => setLedgerLoading(false))
+  }, [selected])
 
-  useEffect(() => { loadLedger() }, [selected])
+  useEffect(() => { loadLedger() }, [loadLedger])
 
-  const selectedBank = banks.find(b => b.id === selected) || null
+  const selectedBank = useMemo(() => banks.find(b => b.id === selected) || null, [banks, selected])
 
-  const totals = (Array.isArray(ledger) ? ledger : []).reduce((acc, t) => {
-    if (!t || t?.status === 'deleted') return acc
-    try {
-      const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
-      const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
-      return {
-        in: toNumber(add(d(acc.in), d(inVal))),
-        out: toNumber(add(d(acc.out), d(outVal))),
+  const totals = useMemo(() => {
+    if (!Array.isArray(ledger) || !ledger.length) return { in: 0, out: 0 }
+    return ledger.reduce((acc, t) => {
+      if (!t || t?.status === 'deleted') return acc
+      try {
+        const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
+        const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
+        return {
+          in: toNumber(add(d(acc.in), d(inVal))),
+          out: toNumber(add(d(acc.out), d(outVal))),
+        }
+      } catch (e) {
+        console.error('totals calc error', t, e)
+        return acc
       }
-    } catch (e) {
-      console.error('totals calc error', t, e)
-      return acc
-    }
-  }, { in: 0, out: 0 })
+    }, { in: 0, out: 0 })
+  }, [ledger])
 
   const [deleting, setDeleting] = useState(false)
 
@@ -110,7 +113,9 @@ export default function BankBook() {
         <Button onClick={() => setAddBankOpen(true)}><Plus size={15} /> Add Bank</Button>
       </div>
 
-      {loading ? <LoadingSkeleton rows={3} cols={4} /> : banks.length === 0 ? (
+      {loading ? (
+        <LoadingSkeleton rows={3} cols={4} />
+      ) : banks.length === 0 ? (
         <Card><CardContent><EmptyState icon={Landmark} title="No banks added" text="Add a bank account to start recording transactions" /></CardContent></Card>
       ) : (
         <>
@@ -137,7 +142,9 @@ export default function BankBook() {
                 action={<Button size="sm" onClick={() => setTxOpen(true)}><Plus size={14} /> Add Transaction</Button>}
               />
               <CardContent className="p-0">
-                {ledgerLoading ? <div className="p-6"><LoadingSkeleton rows={4} cols={6} /></div> : ledger.length === 0 ? (
+                {ledgerLoading ? (
+                  <div className="p-6"><LoadingSkeleton rows={4} cols={6} /></div>
+                ) : !ledger.length ? (
                   <EmptyState icon={ArrowDownLeft} title="No transactions" text="Add deposits or payments to see the running balance" />
                 ) : (
                   <div className="overflow-x-auto">
