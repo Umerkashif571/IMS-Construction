@@ -49,7 +49,8 @@ function parseAmount(v) {
 }
 
 // GET /api/banks — list banks with running balance per bank
-router.get('/', authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
+// Also support /api/bank-accounts as alias for backward compatibility
+router.get(['/', '/bank-accounts'], authenticate, authorize('owner', 'admin', 'finance'), async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT b.*,

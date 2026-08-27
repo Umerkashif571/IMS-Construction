@@ -16,9 +16,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
+          // Force split recharts/d3 into separate chunk FIRST
+          if (id.includes('recharts') || id.includes('d3-') || id.includes('d3.')) return 'vendor-recharts'
           if (id.includes('node_modules')) {
             if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) return 'vendor-react'
-            if (id.includes('lucide-react') || id.includes('recharts')) return 'vendor-ui'
+            if (id.includes('lucide-react')) return 'vendor-ui'
             if (id.includes('axios') || id.includes('decimal.js') || id.includes('date-fns')) return 'vendor-utils'
             if (id.includes('@supabase')) return 'vendor-supabase'
             if (id.includes('react-window') || id.includes('react-virtualized-auto-sizer')) return 'vendor-virtual'

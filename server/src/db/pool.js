@@ -16,9 +16,10 @@ const pool = process.env.DATABASE_URL
       // Cross-region latency (iad1 -> ap-southeast-2) can be 300-500ms per round-trip.
       // Cold start needs full TCP+TLS handshake + pooler assignment.
       // Use single connection per instance, generous timeouts.
-      max: process.env.VERCEL ? 1 : 10,
-      connectionTimeoutMillis: process.env.VERCEL ? 15000 : 8000,
-      idleTimeoutMillis: process.env.VERCEL ? 60000 : 30000,
+      // For long-running server: small pool, longer idle timeout to avoid pooler circuit breaker
+      max: process.env.VERCEL ? 1 : 3,
+      connectionTimeoutMillis: process.env.VERCEL ? 15000 : 30000,
+      idleTimeoutMillis: process.env.VERCEL ? 60000 : 300000,
       allowExitOnIdle: true,
       // Disable prepared statements for pooler compatibility
       statement_timeout: false,
@@ -34,6 +35,13 @@ const pool = process.env.DATABASE_URL
 
 pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err);
+});
+
+// Graceful handling of connection errors - don't crash the process
+pool.on('connect', (client) => {
+  client.on('error', (err) => {
+    console.error('Client connection error:', err.message);
+  });
 });
 
 module.exports = pool;

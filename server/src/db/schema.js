@@ -94,6 +94,17 @@ async function createSchema(pool = require('./pool')) {
       END $$;
     `);
 
+    // Project Managers (for PM project-scoping in finance module)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_managers (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+        user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (project_id, user_id)
+      )
+    `);
+
     // Warehouses / Sites
     await client.query(`
       CREATE TABLE IF NOT EXISTS warehouses (
@@ -768,6 +779,10 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_notifications_user_read ON notifications(user_id, is_read);
       CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_banks_created_at ON banks(created_at);
+      CREATE INDEX IF NOT EXISTS idx_bank_transactions_bank_date_created ON bank_transactions(bank_id, date ASC, created_at ASC);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_materials_warehouse_active ON materials(warehouse_id, is_active);
+      CREATE INDEX IF NOT EXISTS idx_users_role_active ON users(role, is_active);
       CREATE INDEX IF NOT EXISTS idx_bank_transactions_bank_id ON bank_transactions(bank_id);
       CREATE INDEX IF NOT EXISTS idx_bank_transactions_date ON bank_transactions(date);
       CREATE INDEX IF NOT EXISTS idx_bank_transactions_status ON bank_transactions(status);
@@ -783,6 +798,8 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_projects_name_client_trgm ON projects USING gin (name gin_trgm_ops, client gin_trgm_ops);
       CREATE INDEX IF NOT EXISTS idx_vendors_status ON vendors(status);
       CREATE INDEX IF NOT EXISTS idx_vendors_name_trgm ON vendors USING gin (name gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_project_managers_project_id ON project_managers(project_id);
+      CREATE INDEX IF NOT EXISTS idx_project_managers_user_id ON project_managers(user_id);
     `);
 
     // ============ CONSTRAINTS (guarded — skip gracefully if existing data would violate) ============

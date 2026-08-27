@@ -5,7 +5,20 @@ import { Modal, Button, Input, Badge, LoadingSkeleton, EmptyState, Card, CardHea
 import { Plus, Landmark, ArrowDownLeft, ArrowUpRight, Trash2, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
-import { d, add, toNumber } from '../utils/decimal'
+
+let d, add, toNumber
+try {
+  const decimalUtils = require('../utils/decimal')
+  d = decimalUtils.d
+  add = decimalUtils.add
+  toNumber = decimalUtils.toNumber
+} catch (e) {
+  console.warn('Decimal utils not available, using fallback', e)
+}
+
+const safeD = (typeof d === 'function') ? d : (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
+const safeAdd = (typeof add === 'function') ? add : (a, b) => Number(a) + Number(b)
+const safeToNumber = (typeof toNumber === 'function') ? toNumber : (v) => Math.round(Number(v) * 100) / 100
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
@@ -74,8 +87,8 @@ export default function BankBook() {
         const inVal = typeof t?.amount_in === 'number' || typeof t?.amount_in === 'string' ? t.amount_in : 0
         const outVal = typeof t?.amount_out === 'number' || typeof t?.amount_out === 'string' ? t.amount_out : 0
         return {
-          in: toNumber(add(d(acc.in), d(inVal))),
-          out: toNumber(add(d(acc.out), d(outVal))),
+          in: safeToNumber(safeAdd(safeD(acc.in), safeD(inVal))),
+          out: safeToNumber(safeAdd(safeD(acc.out), safeD(outVal))),
         }
       } catch (e) {
         console.error('totals calc error', t, e)

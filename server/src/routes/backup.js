@@ -80,27 +80,42 @@ async function dumpWithoutPgDump() {
     'stock_movements', 'vehicles', 'vehicle_fuel_logs', 'vehicle_maintenance_logs',
     'tools', 'tool_checkout_log', 'project_allocations', 'transfer_requests',
     'purchase_orders', 'purchase_order_items', 'material_transactions', 'gate_passes',
-    'audit_logs', 'activity_feed', 'salaries', 'petty_cash', 'vendor_payments', 'deletion_requests'
+    'audit_logs', 'activity_feed', 'salaries', 'petty_cash', 'vendor_payments', 'deletion_requests',
+    'project_managers', 'banks', 'bank_transactions', 'amount_received', 'petty_cash_utilization',
+    'notifications'
   ];
   let sql = '-- IMS Database Backup\n-- Generated: ' + new Date().toISOString() + '\n\n';
   for (const table of tables) {
-    try {
-      const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY created_at`);
-      if (rows.length === 0) continue;
-      const cols = Object.keys(rows[0]);
-      for (const row of rows) {
-        const vals = cols.map(c => {
-          const v = row[c];
-          if (v === null || v === undefined) return 'NULL';
-          if (v instanceof Date || typeof v === 'string') {
-            return `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
-          }
-          return v;
-        });
-        sql += `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});\n`;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const { rows } = await pool.query(`SELECT * FROM ${table} ORDER BY created_at`);
+        if (rows.length === 0) { sql += `-- Table ${table}: no data\n\n`; break; }
+        const cols = Object.keys(rows[0]);
+        for (const row of rows) {
+          const vals = cols.map(c => {
+            const v = row[c];
+            if (v === null || v === undefined) return 'NULL';
+            if (v instanceof Date || typeof v === 'string') {
+              return `'${String(v).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
+            }
+            return v;
+          });
+          sql += `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});\n`;
+        }
+        sql += '\n';
+        break;
+      } catch (e) {
+        retries--;
+        if (retries === 0) {
+          console.log(`Skipping table ${table} after retries: ${e.message}`);
+          sql += `-- Table ${table}: SKIPPED (${e.message})\n\n`;
+        } else {
+          console.log(`Retrying table ${table} (${retries} retries left): ${e.message}`);
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
-      sql += '\n';
-    } catch (e) { console.log(`Skipping table ${table}: ${e.message}`); }
+    }
   }
   return sql;
 }

@@ -76,6 +76,8 @@ async function ensureSeed() {
 
 // Middleware to ensure seed runs before any API route
 app.use('/api', async (req, res, next) => {
+  // Skip ensureSeed for health endpoint
+  if (req.path === '/health') return next();
   await ensureSeed();
   next();
 });
@@ -141,6 +143,8 @@ app.use('/api/gatepass', gatepassRoutes);
 app.use('/api/projects/:projectId/finance', financeRoutes);
 app.use('/api/finance', financeRoutes.globalRouter);
 app.use('/api/banks', bankRoutes);
+// Alias for backward compatibility
+app.use('/api/bank-accounts', bankRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 // 404 for unknown API routes

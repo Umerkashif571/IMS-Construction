@@ -3,6 +3,14 @@ const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
 
+// Global error handlers to prevent crashes
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
 const app = require('./app');
 const pool = require('./db/pool');
 const { seedDatabase } = require('./db/seed');
@@ -102,9 +110,12 @@ async function start() {
   } else {
     console.log('Seeding skipped: NODE_ENV=production and SEED_ENABLED is not set to "true"');
   }
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`IMS Server running on port ${PORT}`);
     console.log(`API: http://localhost:${PORT}/api`);
+  });
+  server.on('error', (err) => {
+    console.error('Server error:', err);
   });
 }
 
