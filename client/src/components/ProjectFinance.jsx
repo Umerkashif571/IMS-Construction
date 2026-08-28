@@ -6,9 +6,34 @@ import { Plus, Trash2, Users, Wallet, HandCoins, ClipboardList, ShieldCheck, Shi
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
-import { d, add, sub, mul, div, round2, toNumber, gt, gte } from '../utils/decimal'
 import ErrorBoundary from './ErrorBoundary'
 import { useSubmitGuard } from '../hooks/useSubmitGuard'
+
+let d, add, sub, mul, div, round2, toNumber, gt, gte
+try {
+  const decimalUtils = require('../utils/decimal')
+  d = decimalUtils.d
+  add = decimalUtils.add
+  sub = decimalUtils.sub
+  mul = decimalUtils.mul
+  div = decimalUtils.div
+  round2 = decimalUtils.round2
+  toNumber = decimalUtils.toNumber
+  gt = decimalUtils.gt
+  gte = decimalUtils.gte
+} catch (e) {
+  console.warn('Decimal utils not available, using fallback', e)
+}
+
+const safeD = (typeof d === 'function') ? d : (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
+const safeAdd = (typeof add === 'function') ? add : (a, b) => Number(a) + Number(b)
+const safeSub = (typeof sub === 'function') ? sub : (a, b) => Number(a) - Number(b)
+const safeMul = (typeof mul === 'function') ? mul : (a, b) => Number(a) * Number(b)
+const safeDiv = (typeof div === 'function') ? div : (a, b) => Number(a) / Number(b)
+const safeRound2 = (typeof round2 === 'function') ? round2 : (v) => Math.round(Number(v) * 100) / 100
+const safeToNumber = (typeof toNumber === 'function') ? toNumber : (v) => Math.round(Number(v) * 100) / 100
+const safeGt = (typeof gt === 'function') ? gt : (a, b) => Number(a) > Number(b)
+const safeGte = (typeof gte === 'function') ? gte : (a, b) => Number(a) >= Number(b)
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
@@ -72,8 +97,8 @@ export default function ProjectFinance({ projectId, projectName }) {
   const canSeeVendors = user?.role !== 'manager'
   const isOwner = user?.role === 'owner'
 
-  const utilizedOf = (pc) => toNumber(d(pc?.utilized ?? pc?.utilized_total ?? 0))
-  const remainingFor = (pc) => toNumber(round2(sub(d(pc.amount), d(utilizedOf(pc)))))
+  const utilizedOf = (pc) => safeToNumber(safeD(pc?.utilized ?? pc?.utilized_total ?? 0))
+  const remainingFor = (pc) => safeToNumber(safeRound2(safeSub(safeD(pc.amount), safeD(utilizedOf(pc)))))
 
   const openUtilDetail = (pc) => {
     setUtilFilters({ category: '', from: '', to: '' })
@@ -664,11 +689,11 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
 
   // Outstanding balance for the selected PO (PO total minus already paid, for partial payments)
   const poOutstanding = (po) => {
-    const total = d(po?.total_amount)
+    const total = safeD(po?.total_amount)
     const paid = (vendorPayments || [])
       .filter(vp => vp.po_id === po?.id && vp.status !== 'deleted')
-      .reduce((s, vp) => add(d(s), d(vp.amount)), d(0))
-    return toNumber(round2(sub(total, paid)))
+      .reduce((s, vp) => safeAdd(safeD(s), safeD(vp.amount)), safeD(0))
+    return safeToNumber(safeRound2(safeSub(total, paid)))
   }
 
   const handlePoSelect = (e) => {
@@ -793,7 +818,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
     return <EmptyState icon={Wallet} title={rows.length === 0 ? 'No utilization entries yet' : 'No expenses match'} text={rows.length === 0 ? 'Add one to get started' : 'No expenses match the current filters'} />
   }
 
-  let run = d(0)
+  let run = safeD(0)
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
@@ -807,7 +832,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.map(u => {
-              run = round2(add(run, d(u.amount)))
+              run = safeRound2(safeAdd(run, safeD(u.amount)))
               return (
                 <tr key={u.id} className="hover:bg-slate-50">
                   <td className="px-4 py-2.5 text-slate-500">{fmtDate(u.date)}</td>
@@ -815,7 +840,7 @@ function UtilizationTable({ entries, filters, canRequestDelete, onDelete }) {
                   <td className="px-4 py-2.5 max-w-[180px] truncate" title={u.note || ''}>{u.note || '-'}</td>
                   <td className="px-4 py-2.5 text-slate-500">{u.receipt_ref || '-'}</td>
                   <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(u.amount)}</td>
-                  <td className="px-4 py-2.5 text-right text-slate-600">{formatPKR(toNumber(run))}</td>
+                  <td className="px-4 py-2.5 text-right text-slate-600">{formatPKR(safeToNumber(run))}</td>
                   <td className="px-4 py-2.5">{txStatusBadge(u.status)}</td>
                   <td className="px-4 py-2.5">
                     {canRequestDelete && u.status === 'active' && (
