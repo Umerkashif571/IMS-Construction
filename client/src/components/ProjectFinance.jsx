@@ -9,31 +9,16 @@ import { formatPKR } from '../format'
 import ErrorBoundary from './ErrorBoundary'
 import { useSubmitGuard } from '../hooks/useSubmitGuard'
 
-let d, add, sub, mul, div, round2, toNumber, gt, gte
-try {
-  const decimalUtils = require('../utils/decimal')
-  d = decimalUtils.d
-  add = decimalUtils.add
-  sub = decimalUtils.sub
-  mul = decimalUtils.mul
-  div = decimalUtils.div
-  round2 = decimalUtils.round2
-  toNumber = decimalUtils.toNumber
-  gt = decimalUtils.gt
-  gte = decimalUtils.gte
-} catch (e) {
-  console.warn('Decimal utils not available, using fallback', e)
-}
-
-const safeD = (typeof d === 'function') ? d : (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
-const safeAdd = (typeof add === 'function') ? add : (a, b) => Number(a) + Number(b)
-const safeSub = (typeof sub === 'function') ? sub : (a, b) => Number(a) - Number(b)
-const safeMul = (typeof mul === 'function') ? mul : (a, b) => Number(a) * Number(b)
-const safeDiv = (typeof div === 'function') ? div : (a, b) => Number(a) / Number(b)
-const safeRound2 = (typeof round2 === 'function') ? round2 : (v) => Math.round(Number(v) * 100) / 100
-const safeToNumber = (typeof toNumber === 'function') ? toNumber : (v) => Math.round(Number(v) * 100) / 100
-const safeGt = (typeof gt === 'function') ? gt : (a, b) => Number(a) > Number(b)
-const safeGte = (typeof gte === 'function') ? gte : (a, b) => Number(a) >= Number(b)
+// Fallback decimal utilities (avoid ESM import issues in production builds)
+const safeD = (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
+const safeAdd = (a, b) => Number(a) + Number(b)
+const safeSub = (a, b) => Number(a) - Number(b)
+const safeMul = (a, b) => Number(a) * Number(b)
+const safeDiv = (a, b) => Number(a) / Number(b)
+const safeRound2 = (v) => Math.round(Number(v) * 100) / 100
+const safeToNumber = (v) => Math.round(Number(v) * 100) / 100
+const safeGt = (a, b) => Number(a) > Number(b)
+const safeGte = (a, b) => Number(a) >= Number(b)
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 

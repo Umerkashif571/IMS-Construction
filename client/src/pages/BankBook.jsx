@@ -6,19 +6,10 @@ import { Plus, Landmark, ArrowDownLeft, ArrowUpRight, Trash2, Info } from 'lucid
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 
-let d, add, toNumber
-try {
-  const decimalUtils = require('../utils/decimal')
-  d = decimalUtils.d
-  add = decimalUtils.add
-  toNumber = decimalUtils.toNumber
-} catch (e) {
-  console.warn('Decimal utils not available, using fallback', e)
-}
-
-const safeD = (typeof d === 'function') ? d : (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
-const safeAdd = (typeof add === 'function') ? add : (a, b) => Number(a) + Number(b)
-const safeToNumber = (typeof toNumber === 'function') ? toNumber : (v) => Math.round(Number(v) * 100) / 100
+// Fallback decimal utilities (avoid ESM import issues in production builds)
+const safeD = (v) => (v === null || v === undefined || v === '') ? 0 : Number(v)
+const safeAdd = (a, b) => Number(a) + Number(b)
+const safeToNumber = (v) => Math.round(Number(v) * 100) / 100
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
