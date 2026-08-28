@@ -52,6 +52,8 @@ const fmtMonth = (d) => (d ? new Date(d).toLocaleDateString('en-PK', { month: 'l
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString() : '-')
 
 export default function ProjectFinance({ projectId, projectName }) {
+  if (!projectId) return null
+
   const { user } = useAuth()
   const [summary, setSummary] = useState(null)
   const [salaries, setSalaries] = useState([])

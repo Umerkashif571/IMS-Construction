@@ -93,10 +93,11 @@ export default function Projects() {
   const tabParam = searchParams.get('tab')
   useEffect(() => {
     if (!projectParam) return
-    const targetTab = tabParam === 'finance' ? 'finance' : 'overview'
-    setDetailTab(targetTab)
     Promise.all([api.get(`/projects/${projectParam}`), api.get(`/projects/${projectParam}/material-cost`)])
-      .then(([projRes, matCostRes]) => setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data }))
+      .then(([projRes, matCostRes]) => {
+        setDetailModal({ open: true, project: projRes.data, materials: matCostRes.data })
+        setDetailTab(tabParam === 'finance' ? 'finance' : 'overview')
+      })
       .catch(err => { console.error(err); toast.error('Failed to load project from notification') })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectParam])
@@ -259,7 +260,7 @@ export default function Projects() {
               </div>
             )}
 
-            {detailTab === 'finance' && (
+            {detailTab === 'finance' && detailModal.project && (
               <ProjectFinance projectId={detailModal.project.id} projectName={detailModal.project.name} />
             )}
 
