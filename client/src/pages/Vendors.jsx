@@ -34,6 +34,7 @@ export default function Vendors() {
   const [overview, setOverview] = useState(null)
   const [payTypeFilter, setPayTypeFilter] = useState('')
   const [pos, setPos] = useState([])
+  const [posLoading, setPosLoading] = useState(false)
   const [poSearch, setPoSearch] = useState('')
   const [poStatusFilter, setPoStatusFilter] = useState('')
   const [createPoModal, setCreatePoModal] = useState({ open: false, vendor: null })
@@ -97,10 +98,13 @@ export default function Vendors() {
     setOverviewTab('pos')
     setOverview(null)
     setPayTypeFilter('')
+    setPosLoading(true)
+    setPos([])
     try {
       const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendor.id } })
       setPos(data?.data || data || [])
     } catch (err) { console.error(err); toast.error('Failed to load purchase orders'); setPos([]) }
+    finally { setPosLoading(false) }
     if (canSeePayments) {
       try {
         const { data } = await api.get('/finance/vendor-overview', { params: { vendor_id: vendor.id } })
@@ -376,14 +380,16 @@ export default function Vendors() {
                 <div className="flex-1"><Input placeholder="Search POs..." value={poSearch} onChange={e => setPoSearch(e.target.value)} /></div>
                 <div className="w-48"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="admin_approved">Admin Approved</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
               </div>
-              {filteredPos.length === 0 ? (
+              {posLoading ? (
+                <LoadingSkeleton rows={5} cols={4} />
+              ) : filteredPos.length === 0 ? (
                 <EmptyState icon={FileText} title="No purchase orders" text="No POs found for this vendor" />
               ) : (
                 <div className="space-y-2">
                   {filteredPos.map(po => (
                     <div key={po.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => openPoDetail(po)}>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items_center gap-3">
                           <span className="text-sm font-medium">#{po.po_number}</span>
                           <span className="text-xs text-gray-400">{po.created_at ? new Date(po.created_at).toLocaleDateString() : '-'}</span>
                           {statusBadge(po.status)}

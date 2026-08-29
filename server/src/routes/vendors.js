@@ -102,19 +102,29 @@ router.put('/:id/terms/reorder', authenticate, authorize('owner', 'admin', 'proc
 // Purchase Orders list for a vendor
 router.get('/:id/purchase-orders', authenticate, async (req, res) => {
   try {
+    const vendorId = req.params.id;
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(vendorId)) {
+      return res.status(400).json({ error: 'Invalid vendor ID format' });
+    }
+
     const { status } = req.query;
     let sql = `SELECT po.*, v.name as vendor_name, p.name as project_name
              FROM purchase_orders po
              LEFT JOIN vendors v ON po.vendor_id=v.id
              LEFT JOIN projects p ON po.project_id=p.id
              WHERE po.vendor_id=$1`;
-    const params = [req.params.id];
+    const params = [vendorId];
     let idx = 2;
     if (status) { sql += ` AND po.status = $${idx}`; params.push(status); idx++; }
     sql += ' ORDER BY po.created_at DESC';
     const { rows } = await pool.query(sql, params);
     res.json(rows);
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) {
+    console.error('GET /vendors/:id/purchase-orders error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 // Create PO for a specific vendor
