@@ -37,7 +37,18 @@ export default function Vendors() {
   const [poSearch, setPoSearch] = useState('')
   const [poStatusFilter, setPoStatusFilter] = useState('')
   const [createPoModal, setCreatePoModal] = useState({ open: false, vendor: null })
-  const [poForm, setPoForm] = useState({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
+  const [poForm, setPoForm] = useState({ 
+    items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], 
+    notes: '', 
+    project_id: '',
+    special_discount: '',
+    account_charged: '',
+    product_category: '',
+    approved_by_name: '',
+    note_to_accounts: '',
+    seller_acceptance: '',
+    terms: [] // PO-specific terms
+  })
   const [poDetailModal, setPoDetailModal] = useState({ open: false, po: null })
   const [rejectModal, setRejectModal] = useState({ open: false, poId: null, level: null })
   const [rejectReason, setRejectReason] = useState('')
@@ -126,8 +137,28 @@ export default function Vendors() {
 
   const openCreatePo = (vendor) => {
     setCreatePoModal({ open: true, vendor })
-    setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
+    // Reset form with vendor default terms
+    const resetForm = { 
+      items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], 
+      notes: '', 
+      project_id: '',
+      special_discount: '',
+      account_charged: '',
+      product_category: '',
+      approved_by_name: '',
+      note_to_accounts: '',
+      seller_acceptance: '',
+      terms: []
+    }
+    setPoForm(resetForm)
     api.get('/projects').then(({ data }) => setProjects(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load sites') })
+    // Load vendor default terms
+    if (vendor?.id) {
+      api.get(`/vendors/${vendor.id}/terms`).then(({ data }) => {
+        const vendorTerms = (data || []).map((t, idx) => ({ id: `vendor-${t.id}`, term_text: t.term_text, display_order: t.display_order }))
+        setPoForm(prev => ({ ...prev, terms: vendorTerms }))
+      }).catch(err => console.error('Failed to load vendor terms:', err))
+    }
   }
 
   const handleCreatePO = async () => {
@@ -138,10 +169,17 @@ export default function Vendors() {
         items: poForm.items.map(it => ({ ...it, quantity: parseFloat(it.quantity) || 0, unit_price: parseFloat(it.unit_price) || 0 })),
         notes: poForm.notes,
         project_id: poForm.project_id,
+        special_discount: poForm.special_discount,
+        account_charged: poForm.account_charged,
+        product_category: poForm.product_category,
+        approved_by_name: poForm.approved_by_name,
+        note_to_accounts: poForm.note_to_accounts,
+        seller_acceptance: poForm.seller_acceptance,
+        terms: poForm.terms.map(t => ({ term_text: t.term_text, display_order: t.display_order }))
       })
       toast.success(`Purchase order ${data.po_number} created`)
       setCreatePoModal({ open: false, vendor: null })
-      setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' })
+      setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '', special_discount: '', account_charged: '', product_category: '', approved_by_name: '', note_to_accounts: '', seller_acceptance: '', terms: [] })
       setPoDetailModal({ open: true, po: data })
       if (poModal.open) setPoModal({ open: false, vendor: null })
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create PO') }
@@ -182,23 +220,55 @@ export default function Vendors() {
     const printContents = document.getElementById('po-document')?.innerHTML
     if (!printContents) return
     const win = window.open('', '_blank')
-    win.document.write(`<html><head><title>Purchase Order</title>
-      <style>
-        body { font-family: 'Courier New', monospace; padding: 40px; color: #1e293b; }
-        .header { text-align: center; border-bottom: 2px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px; }
-        .header h1 { font-size: 24px; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
-        .header p { margin: 4px 0; font-size: 12px; color: #64748b; }
-        .info-row { display: flex; justify-content: space-between; margin-bottom: 30px; }
-        .info-box { width: 45%; }
-        .info-box h3 { font-size: 11px; text-transform: uppercase; color: #64748b; margin-bottom: 4px; }
-        .info-box p { margin: 2px 0; font-size: 13px; }
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-        th { background: #f1f5f9; text-align: left; padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #475569; border-bottom: 2px solid #cbd5e1; }
-        td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #e2e8f0; }
-        .total-row td { font-weight: bold; border-top: 2px solid #1e293b; font-size: 14px; }
-        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; text-align: center; }
-        .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
-      </style></head><body>${printContents}</body></html>`)
+    win.document.write(`<!DOCTYPE html>
+<html><head><title>Work Order - ${poDetailModal.po?.po_number || ''}</title>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 20mm 15mm; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 11px; line-height: 1.4; color: #1a1a2e; padding: 0; margin: 0; }
+  .page { padding: 10px; }
+  .company-header { text-align: center; border-bottom: 3px double #1a1a2e; padding-bottom: 15px; margin-bottom: 20px; }
+  .company-name { font-size: 22px; font-weight: 800; color: #1a1a2e; letter-spacing: 1px; margin: 0; }
+  .company-tagline { font-size: 10px; color: #555; margin-top: 4px; letter-spacing: 2px; text-transform: uppercase; }
+  .company-address { font-size: 9px; color: #666; margin-top: 6px; line-height: 1.5; }
+  .po-title { text-align: center; font-size: 16px; font-weight: 700; color: #1a1a2e; margin: 15px 0 20px; text-transform: uppercase; letter-spacing: 1px; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; padding: 8px 0; }
+  .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; font-size: 10px; }
+  .info-box { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px 10px; }
+  .info-label { font-weight: 600; color: #444; text-transform: uppercase; font-size: 8px; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .info-value { font-size: 10px; color: #1a1a2e; }
+  .manager-procurement { text-align: right; font-size: 10px; color: #444; margin-bottom: 15px; font-style: italic; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 10px; }
+  th { background: #1a1a2e; color: white; text-align: left; padding: 8px 6px; font-weight: 600; text-transform: uppercase; font-size: 8px; letter-spacing: 0.5px; border: 1px solid #1a1a2e; }
+  th.num { text-align: center; width: 40px; }
+  th.desc { width: 35%; }
+  th.qty, th.unit, th.rate, th.amt { text-align: right; width: 70px; }
+  td { padding: 7px 6px; border: 1px solid #ddd; vertical-align: top; }
+  td.num { text-align: center; font-weight: 500; }
+  td.desc { font-size: 10px; line-height: 1.3; }
+  td.qty, td.unit, td.rate, td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { background: #f5f5f5; font-weight: 700; border-top: 2px solid #1a1a2e; }
+  .totals-section { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+  .totals-box { border: 1px solid #ddd; border-radius: 4px; padding: 12px; background: #fafafa; }
+  .totals-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; font-size: 10px; }
+  .totals-row:last-child { border-bottom: none; font-weight: 700; font-size: 11px; color: #1a1a2e; }
+  .totals-label { color: #555; }
+  .totals-value { font-variant-numeric: tabular-nums; }
+  .terms-section { margin-top: 20px; }
+  .terms-title { font-weight: 700; font-size: 10px; text-transform: uppercase; color: #1a1a2e; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  .terms-list { font-size: 9.5px; line-height: 1.6; color: #333; }
+  .terms-list ol { margin: 0; padding-left: 18px; }
+  .terms-list li { margin-bottom: 4px; }
+  .footer-fields { margin-top: 25px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; font-size: 9.5px; }
+  .footer-box { border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: #fafafa; }
+  .footer-label { font-weight: 600; color: #444; text-transform: uppercase; font-size: 8px; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .footer-value { min-height: 20px; color: #333; white-space: pre-wrap; }
+  .signatures { margin-top: 30px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; font-size: 9px; text-align: center; }
+  .sig-box { border-top: 1px solid #999; padding-top: 8px; }
+  .sig-label { font-weight: 600; color: #444; text-transform: uppercase; font-size: 7px; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .official-footer { margin-top: 30px; text-align: center; border-top: 2px solid #1a1a2e; padding-top: 15px; font-size: 8px; color: #555; line-height: 1.5; }
+  .no-print { display: none; }
+  @media print { .no-print { display: none !important; } }
+</style></head><body><div class="page">${printContents}</div></body></html>`)
     win.document.close()
     setTimeout(() => { win.print() }, 500)
   }
@@ -333,30 +403,85 @@ export default function Vendors() {
       </Modal>
 
       {/* Create PO Modal */}
-      <Modal isOpen={createPoModal.open} onClose={() => { setCreatePoModal({ open: false, vendor: null }); setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '' }) }} title={`Create PO: ${createPoModal.vendor?.name}`} size="max-w-lg">
+      <Modal isOpen={createPoModal.open} onClose={() => { setCreatePoModal({ open: false, vendor: null }); setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '', special_discount: '', account_charged: '', product_category: '', approved_by_name: '', note_to_accounts: '', seller_acceptance: '', terms: [] }) }} title={`Create PO: ${createPoModal.vendor?.name}`} size="max-w-3xl">
         <div className="space-y-4">
-          <Select label="Site (Project) *" value={poForm.project_id} onChange={e => setPoForm({ ...poForm, project_id: e.target.value })}>
-            <option value="">Select site...</option>
-            {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </Select>
-          {poForm.items.map((item, idx) => (
-            <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-gray-600">Item #{idx + 1}</span>
-                {poForm.items.length > 1 && (
-                  <Button variant="ghost" size="sm" onClick={() => removePoItem(idx)} className="text-red-600"><X size={14} /> Remove</Button>
-                )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select label="Site (Project) *" value={poForm.project_id} onChange={e => setPoForm({ ...poForm, project_id: e.target.value })}>
+              <option value="">Select site...</option>
+              {(projects || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </Select>
+            <Input type="number" step="0.01" label="Special Discount (RS)" value={poForm.special_discount} onChange={e => setPoForm({ ...poForm, special_discount: e.target.value })} placeholder="0" />
+          </div>
+          <Input label="Account to be Charged" value={poForm.account_charged} onChange={e => setPoForm({ ...poForm, account_charged: e.target.value })} placeholder="e.g. Project Cost - Materials" />
+          <Input label="Product Category" value={poForm.product_category} onChange={e => setPoForm({ ...poForm, product_category: e.target.value })} placeholder="e.g. Construction Materials" />
+          <Input label="Approved By" value={poForm.approved_by_name} onChange={e => setPoForm({ ...poForm, approved_by_name: e.target.value })} placeholder="Name of approving authority" />
+          
+          {/* Items */}
+          <div className="border-t border-gray-200 pt-4">
+            <h4 className="text-sm font-semibold text-gray-700 mb-3">Items</h4>
+            {poForm.items.map((item, idx) => (
+              <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-gray-600">Item #{idx + 1}</span>
+                  {poForm.items.length > 1 && (
+                    <Button variant="ghost" size="sm" onClick={() => removePoItem(idx)} className="text-red-600"><X size={14} /> Remove</Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="col-span-2"><Input value={item.material_name} onChange={e => updatePoItem(idx, 'material_name', e.target.value)} placeholder="Material name *" /></div>
+                  <Input type="number" step="0.01" value={item.quantity} onChange={e => updatePoItem(idx, 'quantity', e.target.value)} placeholder="Quantity" />
+                  <Input value={item.unit} onChange={e => updatePoItem(idx, 'unit', e.target.value)} placeholder="Unit" />
+                  <div className="col-span-2"><Input type="number" step="0.01" value={item.unit_price} onChange={e => updatePoItem(idx, 'unit_price', e.target.value)} placeholder="Unit price" /></div>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2"><Input value={item.material_name} onChange={e => updatePoItem(idx, 'material_name', e.target.value)} placeholder="Material name *" /></div>
-                <Input type="number" step="0.01" value={item.quantity} onChange={e => updatePoItem(idx, 'quantity', e.target.value)} placeholder="Quantity" />
-                <Input value={item.unit} onChange={e => updatePoItem(idx, 'unit', e.target.value)} placeholder="Unit" />
-                <div className="col-span-2"><Input type="number" step="0.01" value={item.unit_price} onChange={e => updatePoItem(idx, 'unit_price', e.target.value)} placeholder="Unit price" /></div>
-              </div>
+            ))}
+            <Button variant="secondary" onClick={addPoItem}><Plus size={16} /> Add Item</Button>
+          </div>
+
+          {/* Terms & Conditions */}
+          <div className="border-t border-gray-200 pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-gray-700">Terms & Conditions</h4>
+              {poForm.terms.some(t => t.id?.startsWith('vendor-')) && (
+                <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">Loaded from vendor defaults — editable for this PO</span>
+              )}
             </div>
-          ))}
-          <Button variant="secondary" onClick={addPoItem}><Plus size={16} /> Add Item</Button>
-          <Input value={poForm.notes} onChange={e => setPoForm({ ...poForm, notes: e.target.value })} placeholder="Delivery notes / expected delivery date" />
+            {poForm.terms.map((term, idx) => (
+              <div key={term.id || idx} className="flex items-center gap-2 mb-2">
+                <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                <Input 
+                  value={term.term_text} 
+                  onChange={e => {
+                    const terms = [...poForm.terms]
+                    terms[idx] = { ...terms[idx], term_text: e.target.value }
+                    setPoForm({ ...poForm, terms })
+                  }} 
+                  placeholder="Term text" 
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const terms = [...poForm.terms]
+                  if (idx > 0) { [terms[idx-1], terms[idx]] = [terms[idx], terms[idx-1]] }
+                  setPoForm({ ...poForm, terms })
+                }} disabled={idx === 0} title="Move up"><ChevronRight size={14} className="-rotate-90" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const terms = [...poForm.terms]
+                  if (idx < terms.length - 1) { [terms[idx], terms[idx+1]] = [terms[idx+1], terms[idx]] }
+                  setPoForm({ ...poForm, terms })
+                }} disabled={idx === poForm.terms.length - 1} title="Move down"><ChevronRight size={14} className="rotate-90" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  const terms = poForm.terms.filter((_, i) => i !== idx)
+                  setPoForm({ ...poForm, terms })
+                }} className="text-red-600" title="Delete"><Trash2 size={14} /></Button>
+              </div>
+            ))}
+            <Button variant="secondary" size="sm" onClick={() => setPoForm({ ...poForm, terms: [...poForm.terms, { id: `custom-${Date.now()}`, term_text: '', display_order: poForm.terms.length }] })}><Plus size={14} /> Add Term</Button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+            <Input label="Note to Al Shafi Enterprises Accounts Dept" value={poForm.note_to_accounts} onChange={e => setPoForm({ ...poForm, note_to_accounts: e.target.value })} placeholder="Special instructions for accounts" />
+            <Input label="Seller's Acceptance" value={poForm.seller_acceptance} onChange={e => setPoForm({ ...poForm, seller_acceptance: e.target.value })} placeholder="Vendor acceptance terms" />
+          </div>
           <Button onClick={handleCreatePO} className="w-full">Create Purchase Order</Button>
         </div>
       </Modal>
@@ -401,60 +526,154 @@ export default function Vendors() {
                 {poDetailModal.po.owner_reject_reason && <p><b>Owner rejection:</b> {poDetailModal.po.owner_reject_reason}</p>}
               </div>
             )}
-            <div id="po-document" className="bg-white border border-gray-200 rounded-xl p-8 text-sm">
-              <div className="text-center border-b-2 border-gray-900 pb-5 mb-6">
-                <h1 className="text-xl font-bold uppercase tracking-widest">Purchase Order</h1>
-                <p className="text-xs text-gray-500 mt-1">#{poDetailModal.po.po_number}</p>
+            <div id="po-document">
+              <div className="company-header">
+                <h2 className="company-name">AL SHAFI ENTERPRISES</h2>
+                <p className="company-tagline">Construction & Trading</p>
+                <p className="company-address">
+                  Head Office: 123 Main Boulevard, Lahore, Pakistan<br/>
+                  Tel: +92-42-XXXXXXX | Email: info@alshafienterprises.com<br/>
+                  NTN: XXXXXXXX | STRN: XXXXXXXXXXXX
+                </p>
               </div>
-              <div className="flex justify-between mb-6">
-                <div>
-                  <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-1">Vendor</h3>
-                  <p className="font-semibold">{poDetailModal.po.vendor_name || '-'}</p>
-                  {poDetailModal.po.vendor_contact && <p className="text-xs text-gray-600">Attn: {poDetailModal.po.vendor_contact}</p>}
-                  {poDetailModal.po.vendor_address && <p className="text-xs text-gray-600">{poDetailModal.po.vendor_address}</p>}
-                  <p className="text-xs text-gray-600">{poDetailModal.po.vendor_city || ''}</p>
-                  {poDetailModal.po.vendor_phone && <p className="text-xs text-gray-600">Tel: {poDetailModal.po.vendor_phone}</p>}
+
+              <div className="po-title">
+                WORK ORDER FOR THE {poDetailModal.po.project_name || poDetailModal.po.project_id ? (poDetailModal.po.project_name || 'PROJECT') : 'PROJECT'}
+              </div>
+
+              <div className="info-grid">
+                <div className="info-box">
+                  <div className="info-label">Messrs</div>
+                  <div className="info-value">{poDetailModal.po.vendor_name || '-'}</div>
                 </div>
-                <div className="text-right">
-                  <h3 className="text-xs uppercase tracking-wider text-gray-500 mb-1">Order Details</h3>
-                  <p className="text-xs text-gray-600">Date: {poDetailModal.po.created_at ? new Date(poDetailModal.po.created_at).toLocaleDateString() : '-'}</p>
-                  <p className="text-xs text-gray-600">Status: {poDetailModal.po.status?.replace(/_/g, ' ')}</p>
-                  {poDetailModal.po.project_name && <p className="text-xs text-gray-600">Site: {poDetailModal.po.project_name}</p>}
-                  {poDetailModal.po.received_by && <p className="text-xs text-gray-600">Received by: {poDetailModal.po.received_by}</p>}
-                  {poDetailModal.po.notes && <p className="text-xs text-gray-600 mt-2 italic">{poDetailModal.po.notes}</p>}
+                <div className="info-box">
+                  <div className="info-label">Attn</div>
+                  <div className="info-value">{poDetailModal.po.vendor_contact || poDetailModal.po.attn || '-'}</div>
+                </div>
+                <div className="info-box">
+                  <div className="info-label">Position</div>
+                  <div className="info-value">{poDetailModal.po.position || '-'}</div>
+                </div>
+                <div className="info-box">
+                  <div className="info-label">Email</div>
+                  <div className="info-value">{poDetailModal.po.vendor_email || poDetailModal.po.email || '-'}</div>
+                </div>
+                <div className="info-box">
+                  <div className="info-label">Tel No</div>
+                  <div className="info-value">{poDetailModal.po.vendor_phone || poDetailModal.po.vendor_tel || poDetailModal.po.phone || '-'}</div>
+                </div>
+                <div className="info-box">
+                  <div className="info-label">P.O. No</div>
+                  <div className="info-value"><strong>{poDetailModal.po.po_number || '-'}</strong></div>
+                </div>
+                <div className="info-box">
+                  <div className="info-label">Order Date</div>
+                  <div className="info-value">{poDetailModal.po.created_at ? new Date(poDetailModal.po.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</div>
                 </div>
               </div>
-              <table className="w-full border-collapse">
+
+              <div className="manager-procurement">
+                Manager-Procurement
+              </div>
+
+              <table>
                 <thead>
                   <tr>
-                    <th className="bg-gray-100 text-left px-3 py-2 text-xs uppercase tracking-wider">Item</th>
-                    <th className="bg-gray-100 text-right px-3 py-2 text-xs uppercase tracking-wider">Qty</th>
-                    <th className="bg-gray-100 text-left px-3 py-2 text-xs uppercase tracking-wider">Unit</th>
-                    <th className="bg-gray-100 text-right px-3 py-2 text-xs uppercase tracking-wider">Unit Price</th>
-                    <th className="bg-gray-100 text-right px-3 py-2 text-xs uppercase tracking-wider">Total</th>
+                    <th className="num">S.No</th>
+                    <th className="desc">Description</th>
+                    <th className="qty">Quantity</th>
+                    <th className="unit">Unit</th>
+                    <th className="rate">Rate (RS)</th>
+                    <th className="amt">Amount (RS)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(poDetailModal.po.items || []).map((item, idx) => (
-                    <tr key={idx} className="border-b border-gray-100">
-                      <td className="px-3 py-2 text-sm">{item.material_name}</td>
-                      <td className="px-3 py-2 text-sm text-right">{(parseFloat(item.quantity) || 0).toLocaleString()}</td>
-                      <td className="px-3 py-2 text-sm">{item.unit}</td>
-                      <td className="px-3 py-2 text-sm text-right">{formatPKR(item.unit_price)}</td>
-                      <td className="px-3 py-2 text-sm text-right">{formatPKR(parseFloat(item.quantity) * parseFloat(item.unit_price))}</td>
+                    <tr key={idx}>
+                      <td className="num">{idx + 1}</td>
+                      <td className="desc">{item.material_name}</td>
+                      <td className="qty">{(parseFloat(item.quantity) || 0).toLocaleString()}</td>
+                      <td className="unit">{item.unit || 'pcs'}</td>
+                      <td className="rate">{formatPKR(item.unit_price).replace('Rs. ', '')}</td>
+                      <td className="amt">{formatPKR(parseFloat(item.quantity) * parseFloat(item.unit_price)).replace('Rs. ', '')}</td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="font-bold">
-                    <td colSpan={4} className="px-3 py-3 text-sm text-right border-t-2 border-gray-900">Total:</td>
-                    <td className="px-3 py-3 text-sm text-right border-t-2 border-gray-900">{formatPKR(poDetailModal.po.total_amount)}</td>
+                  <tr>
+                    <td colSpan="5" className="text-right">Total Amount (RS)</td>
+                    <td className="amt">{formatPKR(poDetailModal.po.total_amount).replace('Rs. ', '')}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan="5" className="text-right">Special Discount (RS)</td>
+                    <td className="amt">{formatPKR(poDetailModal.po.special_discount || 0).replace('Rs. ', '')}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan="5" className="text-right">Discounted Total (RS)</td>
+                    <td className="amt">{formatPKR(poDetailModal.po.discounted_total || poDetailModal.po.total_amount).replace('Rs. ', '')}</td>
                   </tr>
                 </tfoot>
               </table>
-              <div className="mt-8 pt-4 border-t border-gray-200 text-center text-xs text-gray-500">
-                <p>This is a computer-generated document. No signature is required.</p>
-                <p className="mt-1">Generated by IMS — {new Date().toLocaleString()}</p>
+
+              <div className="terms-section">
+                <div className="terms-title">Terms & Conditions</div>
+                <div className="terms-list">
+                  <ol>
+                    {(poDetailModal.po.terms || []).map((term, idx) => (
+                      <li key={term.id || idx}>{term.term_text}</li>
+                    ))}
+                    {(poDetailModal.po.terms || []).length === 0 && (
+                      <li>Standard terms and conditions apply.</li>
+                    )}
+                  </ol>
+                </div>
+              </div>
+
+              <div className="footer-fields">
+                <div className="footer-box">
+                  <div className="footer-label">Account to be Charged</div>
+                  <div className="footer-value">{poDetailModal.po.account_charged || '-'}</div>
+                </div>
+                <div className="footer-box">
+                  <div className="footer-label">Product Category</div>
+                  <div className="footer-value">{poDetailModal.po.product_category || '-'}</div>
+                </div>
+                <div className="footer-box">
+                  <div className="footer-label">Approved By</div>
+                  <div className="footer-value">{poDetailModal.po.approved_by_name || poDetailModal.po.approved_by || '-'}</div>
+                </div>
+                <div className="footer-box">
+                  <div className="footer-label">Note to Al Shafi Enterprises Accounts Dept</div>
+                  <div className="footer-value">{poDetailModal.po.note_to_accounts || '-'}</div>
+                </div>
+              </div>
+
+              <div className="footer-box" style={{gridColumn: '1 / -1'}}>
+                <div className="footer-label">Seller's Acceptance</div>
+                <div className="footer-value">{poDetailModal.po.seller_acceptance || '-'}</div>
+              </div>
+
+              <div className="signatures">
+                <div className="sig-box">
+                  <div className="sig-label">Prepared By</div>
+                  <div>{poDetailModal.po.created_by_name || '-'}</div>
+                </div>
+                <div className="sig-box">
+                  <div className="sig-label">Approved By</div>
+                  <div>{poDetailModal.po.approved_by_name || poDetailModal.po.owner_approved_by_name || '-'}</div>
+                </div>
+                <div className="sig-box">
+                  <div className="sig-label">Authorized Signature</div>
+                  <div>&nbsp;</div>
+                </div>
+              </div>
+
+              <div className="official-footer">
+                <strong>AL SHAFI ENTERPRISES</strong><br/>
+                123 Main Boulevard, Lahore, Pakistan<br/>
+                Tel: +92-42-XXXXXXX | Email: info@alshafienterprises.com<br/>
+                NTN: XXXXXXXX | STRN: XXXXXXXXXXXX<br/>
+                <em>This is a computer-generated document. Valid without signature if approved through the official ERP workflow.</em>
               </div>
             </div>
           </div>
@@ -544,13 +763,51 @@ function VendorForm({ data, onSave, onCancel }) {
   const [form, setForm] = useState({
     id: data?.id || null, name: data?.name || '', contact_person: data?.contact_person || '',
     phone: data?.phone || '', email: data?.email || '', address: data?.address || '',
-    city: data?.city || '', ntn_strn: data?.ntn_strn || '', status: data?.status || 'active', notes: data?.notes || ''
+    city: data?.city || '', ntn_strn: data?.ntn_strn || '', status: data?.status || 'active', notes: data?.notes || '',
+    attn: data?.attn || '', position: data?.position || '', vendor_email: data?.vendor_email || '', vendor_tel: data?.vendor_tel || ''
   })
+  const [vendorTerms, setVendorTerms] = useState(data?.default_terms || [])
+  const [showTerms, setShowTerms] = useState(false)
+
+  useEffect(() => {
+    if (data?.id && !vendorTerms.length) {
+      api.get(`/vendors/${data.id}/terms`).then(({ data: terms }) => setVendorTerms(terms || [])).catch(() => {})
+    }
+  }, [data?.id])
 
   const handleSubmit = (e) => {
     e.preventDefault()
     if (!form.name) return toast.error('Vendor name required')
     onSave(form)
+  }
+
+  const addVendorTerm = () => setVendorTerms([...vendorTerms, { id: `new-${Date.now()}`, term_text: '', display_order: vendorTerms.length }])
+  const removeVendorTerm = (idx) => setVendorTerms(vendorTerms.filter((_, i) => i !== idx))
+  const updateVendorTerm = (idx, field, value) => {
+    const terms = [...vendorTerms]
+    terms[idx] = { ...terms[idx], [field]: value }
+    setVendorTerms(terms)
+  }
+  const moveVendorTerm = (idx, direction) => {
+    const terms = [...vendorTerms]
+    const newIdx = idx + direction
+    if (newIdx >= 0 && newIdx < terms.length) {
+      [terms[idx], terms[newIdx]] = [terms[newIdx], terms[idx]]
+      setVendorTerms(terms)
+    }
+  }
+  const saveVendorTerms = async () => {
+    try {
+      for (const term of vendorTerms) {
+        if (term.id?.startsWith('new-')) {
+          await api.post(`/vendors/${data.id}/terms`, { term_text: term.term_text, display_order: term.display_order })
+        } else {
+          await api.put(`/vendors/${data.id}/terms/${term.id}`, { term_text: term.term_text, display_order: term.display_order })
+        }
+      }
+      toast.success('Vendor default terms saved')
+      setShowTerms(false)
+    } catch (err) { console.error(err); toast.error('Failed to save vendor terms') }
   }
 
   return (
@@ -565,7 +822,46 @@ function VendorForm({ data, onSave, onCancel }) {
         <Select label="Status" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="inactive">Inactive</option></Select>
       </div>
       <Input label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
+      
+      <div className="grid grid-cols-2 gap-4">
+        <Input label="Attn" value={form.attn} onChange={e => setForm({ ...form, attn: e.target.value })} placeholder="Contact person for POs" />
+        <Input label="Position" value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} placeholder="e.g. Purchase Manager" />
+        <Input label="Vendor Email" type="email" value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} placeholder="PO correspondence email" />
+        <Input label="Vendor Tel" value={form.vendor_tel} onChange={e => setForm({ ...form, vendor_tel: e.target.value })} placeholder="PO contact number" />
+      </div>
+      
       <Input label="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+      
+      {/* Vendor Default Terms Management */}
+      <div className="border-t border-gray-200 pt-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-gray-700">Default Terms & Conditions</h4>
+          <Button variant="secondary" size="sm" onClick={() => setShowTerms(!showTerms)}>
+            {showTerms ? 'Hide' : 'Manage'} Terms
+          </Button>
+        </div>
+        {showTerms && (
+          <div className="space-y-2">
+            {vendorTerms.map((term, idx) => (
+              <div key={term.id || idx} className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                <Input 
+                  value={term.term_text} 
+                  onChange={e => updateVendorTerm(idx, 'term_text', e.target.value)} 
+                  placeholder="Term text" 
+                  className="flex-1"
+                />
+                <Button variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, -1)} disabled={idx === 0} title="Move up"><ChevronRight size={14} className="-rotate-90" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, 1)} disabled={idx === vendorTerms.length - 1} title="Move down"><ChevronRight size={14} className="rotate-90" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => removeVendorTerm(idx)} className="text-red-600" title="Delete"><Trash2 size={14} /></Button>
+              </div>
+            ))}
+            <Button variant="secondary" size="sm" onClick={addVendorTerm}><Plus size={14} /> Add Term</Button>
+            {data?.id && <Button variant="primary" size="sm" onClick={saveVendorTerms} className="ml-2">Save Terms</Button>}
+          </div>
+        )}
+      </div>
+
       <div className="flex gap-3 pt-2">
         <Button type="submit">{form.id ? 'Update' : 'Create'}</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>

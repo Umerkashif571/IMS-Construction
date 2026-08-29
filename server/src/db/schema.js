@@ -487,6 +487,92 @@ async function createSchema(pool = require('./pool')) {
       END $$;
     `);
 
+    // ============ PO TERMS & FORMAT FIELDS ============
+    // Vendor Default Terms
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS vendor_default_terms (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        vendor_id UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+        term_text TEXT NOT NULL,
+        display_order INT NOT NULL DEFAULT 0,
+        is_active BOOLEAN DEFAULT true,
+        created_by UUID REFERENCES users(id),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_vendor_default_terms_vendor ON vendor_default_terms(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_default_terms_order ON vendor_default_terms(vendor_id, display_order);
+    `);
+
+    // PO Terms (snapshot copied from vendor defaults at PO creation)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS po_terms (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        po_id UUID NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+        term_text TEXT NOT NULL,
+        display_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_po_terms_po ON po_terms(po_id);
+      CREATE INDEX IF NOT EXISTS idx_po_terms_order ON po_terms(po_id, display_order);
+    `);
+
+    // Purchase Order format fields
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='special_discount') THEN
+          ALTER TABLE purchase_orders ADD COLUMN special_discount DECIMAL(15,2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='discounted_total') THEN
+          ALTER TABLE purchase_orders ADD COLUMN discounted_total DECIMAL(15,2) DEFAULT 0;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='account_charged') THEN
+          ALTER TABLE purchase_orders ADD COLUMN account_charged TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='product_category') THEN
+          ALTER TABLE purchase_orders ADD COLUMN product_category VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='approved_by_name') THEN
+          ALTER TABLE purchase_orders ADD COLUMN approved_by_name VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='note_to_accounts') THEN
+          ALTER TABLE purchase_orders ADD COLUMN note_to_accounts TEXT;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='purchase_orders' AND column_name='seller_acceptance') THEN
+          ALTER TABLE purchase_orders ADD COLUMN seller_acceptance TEXT;
+        END IF;
+      END $$;
+    `);
+
+    // Backfill discounted_total
+    await client.query(`
+      UPDATE purchase_orders
+      SET discounted_total = total_amount - COALESCE(special_discount, 0)
+      WHERE discounted_total IS NULL OR discounted_total = 0
+    `);
+
+    // Vendor contact fields for PO format
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='attn') THEN
+          ALTER TABLE vendors ADD COLUMN attn VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='position') THEN
+          ALTER TABLE vendors ADD COLUMN position VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='vendor_email') THEN
+          ALTER TABLE vendors ADD COLUMN vendor_email VARCHAR(255);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='vendors' AND column_name='vendor_tel') THEN
+          ALTER TABLE vendors ADD COLUMN vendor_tel VARCHAR(100);
+        END IF;
+      END $$;
+    `);
+
     // Purchase order two-step approval workflow (Admin -> Owner) + required site
     await client.query(`
       DO $$

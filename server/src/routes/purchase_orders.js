@@ -56,13 +56,14 @@ router.get('/', authenticate, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// Get single PO with items
+// Get single PO with items and terms
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const { rows: po } = await pool.query(`${PO_JOIN} WHERE po.id=$1`, [req.params.id]);
     if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
-    res.json({ ...po[0], items });
+    const { rows: terms } = await pool.query('SELECT * FROM po_terms WHERE po_id=$1 ORDER BY display_order', [req.params.id]);
+    res.json({ ...po[0], items, terms });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
