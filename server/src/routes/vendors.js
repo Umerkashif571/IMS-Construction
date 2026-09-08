@@ -132,7 +132,7 @@ router.post('/:id/purchase-orders', authenticate, authorize('procurement_officer
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { items, notes, project_id, special_discount, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance } = req.body;
+    const { items, notes, project_id, special_discount, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance, terms } = req.body;
     if (!items || items.length === 0) return res.status(400).json({ error: 'Items required' });
     if (!project_id) return res.status(400).json({ error: 'Site (project) selection is required for a purchase order' });
 
@@ -173,10 +173,23 @@ router.post('/:id/purchase-orders', authenticate, authorize('procurement_officer
       );
     }
 
+    // Insert custom terms from request (PO-specific terms added by user)
+    if (Array.isArray(terms) && terms.length > 0) {
+      for (const term of terms) {
+        if (term.term_text && term.term_text.trim()) {
+          await client.query(
+            `INSERT INTO po_terms (po_id, term_text, display_order) VALUES ($1,$2,$3)`,
+            [po[0].id, term.term_text.trim(), term.display_order || 0]
+          );
+        }
+      }
+    }
+
     await client.query('COMMIT');
 
-    // Fetch PO with items to return
+    // Fetch PO with items and terms to return
     const { rows: items_ } = await client.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [po[0].id]);
+    const { rows: poTerms } = await client.query('SELECT * FROM po_terms WHERE po_id=$1 ORDER BY display_order', [po[0].id]);
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id,
       `Created PO ${poNum} for ${vendor[0].name} (site: ${proj.rows[0].name})`);
     await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendor[0].name} on ${proj.rows[0].name}`, 'purchase_order', po[0].id);
@@ -184,7 +197,7 @@ router.post('/:id/purchase-orders', authenticate, authorize('procurement_officer
       `New purchase order ${poNum}`,
       `${req.user.full_name} created PO ${poNum} for ${vendor[0].name} (site: ${proj.rows[0].name})`,
       `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
-    res.status(201).json({ ...po[0], project_name: proj.rows[0].name, items: items_ });
+    res.status(201).json({ ...po[0], project_name: proj.rows[0].name, items: items_, terms: poTerms });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err); res.status(500).json({ error: 'Server error' });
@@ -329,7 +342,8 @@ router.get('/pos/:id', authenticate, async (req, res) => {
       WHERE po.id=$1`, [req.params.id]);
     if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
-    res.json({ ...po[0], items });
+    const { rows: terms } = await pool.query('SELECT * FROM po_terms WHERE po_id=$1 ORDER BY display_order', [req.params.id]);
+    res.json({ ...po[0], items, terms });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
@@ -339,7 +353,7 @@ router.post('/pos', authenticate, authorize('procurement_officer'), async (req, 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    let { vendor_id, vendor_name, project_id, expected_delivery, notes, items, special_discount, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance } = req.body;
+    let { vendor_id, vendor_name, project_id, expected_delivery, notes, items, special_discount, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance, terms } = req.body;
     if (!vendor_id || !items || items.length === 0) return res.status(400).json({ error: 'Vendor and items required' });
     if (!project_id) return res.status(400).json({ error: 'Site (project) selection is required for a purchase order' });
     const proj = await client.query('SELECT id, name FROM projects WHERE id=$1', [project_id]);
@@ -379,15 +393,28 @@ router.post('/pos', authenticate, authorize('procurement_officer'), async (req, 
       );
     }
 
+    // Insert custom terms from request (PO-specific terms added by user)
+    if (Array.isArray(terms) && terms.length > 0) {
+      for (const term of terms) {
+        if (term.term_text && term.term_text.trim()) {
+          await client.query(
+            `INSERT INTO po_terms (po_id, term_text, display_order) VALUES ($1,$2,$3)`,
+            [po[0].id, term.term_text.trim(), term.display_order || 0]
+          );
+        }
+      }
+    }
+
     await client.query('COMMIT');
 
+    const { rows: poTerms } = await client.query('SELECT * FROM po_terms WHERE po_id=$1 ORDER BY display_order', [po[0].id]);
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id, `Created PO ${poNum}: ${vendorQ.rows[0].name} (site: ${proj.rows[0].name})`);
     await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendorQ.rows[0].name} on ${proj.rows[0].name}`, 'purchase_order', po[0].id);
     await notifyRoles(['owner', 'admin'], 'purchase_order',
       `New purchase order ${poNum}`,
       `${req.user.full_name} created PO ${poNum} for ${vendorQ.rows[0].name} (site: ${proj.rows[0].name})`,
       `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
-    res.status(201).json({ ...po[0], project_name: proj.rows[0].name, items });
+    res.status(201).json({ ...po[0], project_name: proj.rows[0].name, items, terms: poTerms });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err); res.status(500).json({ error: 'Server error' });
@@ -420,73 +447,6 @@ router.put('/pos/:id/delivery', authenticate, authorize('owner', 'admin', 'store
     );
     res.json(rows[0]);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
-});
-
-// Create PO for a specific vendor (POST /vendors/:id/purchase-orders)
-// Procurement role only; the Site (project_id) is mandatory.
-router.post('/:id/purchase-orders', authenticate, authorize('procurement_officer'), async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const { items, notes, project_id, special_discount, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance } = req.body;
-    if (!items || items.length === 0) return res.status(400).json({ error: 'Items required' });
-    if (!project_id) return res.status(400).json({ error: 'Site (project) selection is required for a purchase order' });
-
-    const { rows: vendor } = await client.query('SELECT name FROM vendors WHERE id=$1', [req.params.id]);
-    if (vendor.length === 0) return res.status(404).json({ error: 'Vendor not found' });
-    const proj = await client.query('SELECT id, name FROM projects WHERE id=$1', [project_id]);
-    if (proj.rows.length === 0) return res.status(400).json({ error: 'Selected site (project) does not exist' });
-
-    const poNum = await nextPoNumber();
-    const total_amount = items.reduce((sum, i) => sum + (parseFloat(i.quantity) * parseFloat(i.unit_price)), 0);
-    const discount = parseFloat(special_discount) || 0;
-    const discounted_total = total_amount - discount;
-
-    const { rows: po } = await client.query(
-      `INSERT INTO purchase_orders (po_number, vendor_id, vendor_name, project_id, total_amount, special_discount, discounted_total, notes, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance, created_by, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending') RETURNING *`,
-      [poNum, req.params.id, vendor[0].name, project_id, total_amount, discount, discounted_total, notes, account_charged, product_category, approved_by_name, note_to_accounts, seller_acceptance, req.user.id]
-    );
-
-    for (const item of items) {
-      await client.query(
-        `INSERT INTO purchase_order_items (po_id, material_name, quantity, unit, unit_price, total_price)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [po[0].id, item.material_name, parseFloat(item.quantity) || 0, item.unit || 'pcs', parseFloat(item.unit_price) || 0,
-         (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0)]
-      );
-    }
-
-    // Copy vendor default terms to PO
-    const { rows: vendorTerms } = await client.query(
-      `SELECT term_text, display_order FROM vendor_default_terms WHERE vendor_id=$1 AND is_active=true ORDER BY display_order`,
-      [req.params.id]
-    );
-    for (const vt of vendorTerms) {
-      await client.query(
-        `INSERT INTO po_terms (po_id, term_text, display_order) VALUES ($1,$2,$3)`,
-        [po[0].id, vt.term_text, vt.display_order]
-      );
-    }
-
-    await client.query('COMMIT');
-
-    // Fetch PO with items to return
-    const { rows: items_ } = await client.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [po[0].id]);
-    await logAudit(req.user.id, req.user.full_name, req.user.role, 'created', 'purchase_order', po[0].id,
-      `Created PO ${poNum} for ${vendor[0].name} (site: ${proj.rows[0].name})`);
-    await addActivity(req.user.full_name, 'created', `Created ${poNum} for ${vendor[0].name} on ${proj.rows[0].name}`, 'purchase_order', po[0].id);
-    await notifyRoles(['owner', 'admin'], 'purchase_order',
-      `New purchase order ${poNum}`,
-      `${req.user.full_name} created PO ${poNum} for ${vendor[0].name} (site: ${proj.rows[0].name})`,
-      `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
-    res.status(201).json({ ...po[0], project_name: proj.rows[0].name, items: items_ });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err); res.status(500).json({ error: 'Server error' });
-  } finally {
-    client.release();
-  }
 });
 
 module.exports = router;

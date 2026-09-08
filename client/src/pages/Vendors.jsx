@@ -50,6 +50,7 @@ export default function Vendors() {
     seller_acceptance: '',
     terms: [] // PO-specific terms
   })
+  const [creatingPO, setCreatingPO] = useState(false)
   const [poDetailModal, setPoDetailModal] = useState({ open: false, po: null })
   const [rejectModal, setRejectModal] = useState({ open: false, poId: null, level: null })
   const [rejectReason, setRejectReason] = useState('')
@@ -168,6 +169,7 @@ export default function Vendors() {
   const handleCreatePO = async () => {
     if (poForm.items.length === 0 || !poForm.items[0].material_name) return toast.error('At least one item required')
     if (!poForm.project_id) return toast.error('Site (project) selection is required')
+    setCreatingPO(true)
     try {
       const { data } = await api.post(`/vendors/${createPoModal.vendor.id}/purchase-orders`, {
         items: poForm.items.map(it => ({ ...it, quantity: parseFloat(it.quantity) || 0, unit_price: parseFloat(it.unit_price) || 0 })),
@@ -181,12 +183,13 @@ export default function Vendors() {
         seller_acceptance: poForm.seller_acceptance,
         terms: poForm.terms.map(t => ({ term_text: t.term_text, display_order: t.display_order }))
       })
-      toast.success(`Purchase order ${data.po_number} created`)
+      toast.success(`Purchase order ${data.po_number} created successfully`)
       setCreatePoModal({ open: false, vendor: null })
       setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '', special_discount: '', account_charged: '', product_category: '', approved_by_name: '', note_to_accounts: '', seller_acceptance: '', terms: [] })
       setPoDetailModal({ open: true, po: data })
       if (poModal.open) setPoModal({ open: false, vendor: null })
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create PO') }
+    finally { setCreatingPO(false) }
   }
 
   // Sequential approval: Admin decides first, Owner decides last.
@@ -488,7 +491,9 @@ export default function Vendors() {
             <Input label="Note to Al Shafi Enterprises Accounts Dept" value={poForm.note_to_accounts} onChange={e => setPoForm({ ...poForm, note_to_accounts: e.target.value })} placeholder="Special instructions for accounts" />
             <Input label="Seller's Acceptance" value={poForm.seller_acceptance} onChange={e => setPoForm({ ...poForm, seller_acceptance: e.target.value })} placeholder="Vendor acceptance terms" />
           </div>
-          <Button onClick={handleCreatePO} className="w-full">Create Purchase Order</Button>
+          <Button onClick={handleCreatePO} className="w-full" disabled={creatingPO}>
+            {creatingPO ? 'Creating...' : 'Create Purchase Order'}
+          </Button>
         </div>
       </Modal>
 
