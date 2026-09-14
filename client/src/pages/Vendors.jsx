@@ -26,6 +26,7 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('active')
   const debouncedSearch = useDebouncedValue(search)
   const [modal, setModal] = useState({ open: false, item: null })
   const [deleteConfirm, setDeleteConfirm] = useState({ open: false, id: null })
@@ -57,20 +58,40 @@ export default function Vendors() {
   const [allPos, setAllPos] = useState([])
   const [projects, setProjects] = useState([])
 
-  const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
+  // Role flags mirror the server's authorize() lists exactly:
+  //   PUT /vendors/:id            owner, admin, procurement_officer
+  //   DELETE /vendors/:id         owner, admin
+  //   PUT /vendors/pos/:id/delivery  owner, admin, store_manager
+  //   PUT /purchase-orders/:id/status cancelled  owner, admin
+  const canManageVendor = ['owner', 'admin', 'procurement_officer'].includes(user?.role)
+  const canDeleteVendor = ['owner', 'admin'].includes(user?.role)
+  const canReceive = ['owner', 'admin', 'store_manager'].includes(user?.role)
+  const canCancel = ['owner', 'admin'].includes(user?.role)
   const canSeePayments = ['owner', 'admin', 'finance'].includes(user?.role)
   // Spec: PO creation is exclusively a Procurement role action.
   const canCreatePO = user?.role === 'procurement_officer'
   const isAdmin = user?.role === 'admin'
   const isOwner = user?.role === 'owner'
 
-  const load = (q = '') => {
+  const load = (q = '', status = statusFilter) => {
     setLoading(true)
-    const params = q ? `?search=${q}` : ''
-    api.get(`/vendors${params}`).then(({ data }) => setVendors(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load vendors') }).finally(() => setLoading(false))
+    api.get('/vendors', { params: { search: q || undefined, status: status || 'all' } }).then(({ data }) => setVendors(data?.data || data || [])).catch(err => { console.error(err); toast.error(err.response?.data?.error || 'Failed to load vendors') }).finally(() => setLoading(false))
   }
 
-  useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
+  useEffect(() => { load(debouncedSearch, statusFilter) }, [debouncedSearch, statusFilter])
+
+  // Re-fetch the PO list of the vendor currently open in the PO modal (after approve / receive / cancel)
+  const refreshPos = async (vendorId) => {
+    if (!vendorId) return
+    try {
+      const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendorId } })
+      setPos(data?.data || data || [])
+    } catch (err) { console.error(err) }
+  }
+  const afterPoChange = (data) => {
+    if (poDetailModal.open) setPoDetailModal({ open: true, po: { ...(poDetailModal.po || {}), ...data } })
+    if (poModal.open && poModal.vendor?.id) refreshPos(poModal.vendor.id)
+  }
 
   // Deep link: /vendors?po=<id> opens the PO detail modal
   const [searchParams] = useSearchParams()
@@ -91,7 +112,11 @@ export default function Vendors() {
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/vendors/${deleteConfirm.id}`); toast.success('Vendor deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error('Failed to delete') }
+    try {
+      const { data } = await api.delete(`/vendors/${deleteConfirm.id}`)
+      toast.success(data?.message || 'Vendor deactivated')
+      setDeleteConfirm({ open: false, id: null }); load(search)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to deactivate vendor') }
   }
 
   const viewPOs = async (vendor) => {
@@ -104,7 +129,7 @@ export default function Vendors() {
     try {
       const { data } = await api.get('/vendors/pos/list', { params: { vendor_id: vendor.id } })
       setPos(data?.data || data || [])
-    } catch (err) { console.error(err); toast.error('Failed to load purchase orders'); setPos([]) }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to load purchase orders'); setPos([]) }
     finally { setPosLoading(false) }
     if (canSeePayments) {
       try {
@@ -118,18 +143,41 @@ export default function Vendors() {
     try {
       const { data } = await api.get(`/purchase-orders/${po.id}`)
       setPoDetailModal({ open: true, po: data })
-    } catch (err) { console.error(err); toast.error('Failed to load PO details') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to load PO details') }
   }
 
+  const [poBusy, setPoBusy] = useState(false)
   const handlePoStatus = async (poId, status) => {
+    setPoBusy(true)
     try {
       const { data } = await api.put(`/purchase-orders/${poId}/status`, { status })
       toast.success(`PO ${status}`)
-      if (poDetailModal.open) setPoDetailModal({ ...poDetailModal, po: data })
-      if (poModal.open) {
-        setPos(prev => prev.map(p => p.id === poId ? { ...p, status: data.status, received_by: data.received_by } : p))
-      }
+      afterPoChange(data)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to update PO') }
+    finally { setPoBusy(false) }
+  }
+
+  // Receive all outstanding quantities of an approved PO. The server moves stock for every
+  // item that matches a material by name and reports the rest in unmatched_items.
+  const handleReceiveAll = async (po) => {
+    const outstanding = (po.items || [])
+      .map(it => ({ item_id: it.id, quantity: Math.max(0, (parseFloat(it.quantity) || 0) - (parseFloat(it.quantity_delivered) || 0)) }))
+      .filter(it => it.quantity > 0)
+    if (outstanding.length === 0) return toast.error('Nothing left to receive on this PO')
+    setPoBusy(true)
+    try {
+      const { data } = await api.put(`/vendors/pos/${po.id}/delivery`, { delivered_items: outstanding })
+      toast.success(data.status === 'received' ? 'Goods received — PO marked received and stock updated' : 'Delivery recorded')
+      if (Array.isArray(data.unmatched_items) && data.unmatched_items.length > 0) {
+        toast((t) => (
+          <span className="text-xs">
+            <b>Stock not updated</b> for {data.unmatched_items.length} item(s) with no matching material: {data.unmatched_items.map(u => u.material_name).join(', ')}. Add them via Inventory &gt; Stock In.
+          </span>
+        ), { icon: '⚠️', duration: 10000 })
+      }
+      afterPoChange(data)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to receive goods') }
+    finally { setPoBusy(false) }
   }
 
   const addPoItem = () => setPoForm({ ...poForm, items: [...poForm.items, { material_name: '', quantity: '', unit: '', unit_price: '' }] })
@@ -156,7 +204,7 @@ export default function Vendors() {
       terms: []
     }
     setPoForm(resetForm)
-    api.get('/projects').then(({ data }) => setProjects(data?.data || data || [])).catch(err => { console.error(err); toast.error('Failed to load sites') })
+    api.get('/projects').then(({ data }) => setProjects((data?.data || data || []).filter(p => !['completed', 'cancelled'].includes(p.status)))).catch(err => { console.error(err); toast.error(err.response?.data?.error || 'Failed to load sites') })
     // Load vendor default terms
     if (vendor?.id) {
       api.get(`/vendors/${vendor.id}/terms`).then(({ data }) => {
@@ -168,6 +216,12 @@ export default function Vendors() {
 
   const handleCreatePO = async () => {
     if (poForm.items.length === 0 || !poForm.items[0].material_name) return toast.error('At least one item required')
+    for (let i = 0; i < poForm.items.length; i++) {
+      const it = poForm.items[i]
+      if (!it.material_name?.trim()) return toast.error(`Item #${i + 1}: material name is required`)
+      if (!(parseFloat(it.quantity) > 0)) return toast.error(`Item #${i + 1}: quantity must be greater than 0`)
+      if (!(parseFloat(it.unit_price) >= 0)) return toast.error(`Item #${i + 1}: unit price must be 0 or more`)
+    }
     if (!poForm.project_id) return toast.error('Site (project) selection is required')
     setCreatingPO(true)
     try {
@@ -187,7 +241,7 @@ export default function Vendors() {
       setCreatePoModal({ open: false, vendor: null })
       setPoForm({ items: [{ material_name: '', quantity: '', unit: '', unit_price: '' }], notes: '', project_id: '', special_discount: '', account_charged: '', product_category: '', approved_by_name: '', note_to_accounts: '', seller_acceptance: '', terms: [] })
       setPoDetailModal({ open: true, po: data })
-      if (poModal.open) setPoModal({ open: false, vendor: null })
+      if (poModal.open && poModal.vendor?.id) refreshPos(poModal.vendor.id)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to create PO') }
     finally { setCreatingPO(false) }
   }
@@ -202,10 +256,7 @@ export default function Vendors() {
     try {
       const { data } = await api.put(`/purchase-orders/${poId}/${level}-approve`, { approve: true })
       toast.success(level === 'admin' ? 'PO approved by Admin — awaiting Owner' : 'PO fully approved')
-      if (poDetailModal.open) setPoDetailModal({ ...poDetailModal, po: data })
-      if (poModal.open) {
-        setPos(prev => prev.map(p => p.id === poId ? { ...p, ...data } : p))
-      }
+      afterPoChange(data)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to update PO') }
   }
 
@@ -216,10 +267,7 @@ export default function Vendors() {
       toast.success('PO rejected — reason recorded for the creator')
       setRejectModal({ open: false, poId: null, level: null })
       setRejectReason('')
-      if (poDetailModal.open) setPoDetailModal({ ...poDetailModal, po: data })
-      if (poModal.open) {
-        setPos(prev => prev.map(p => p.id === rejectModal.poId ? { ...p, ...data } : p))
-      }
+      afterPoChange(data)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to reject PO') }
   }
 
@@ -290,16 +338,23 @@ export default function Vendors() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Vendors</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Manage vendors and purchase orders</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Vendors</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage vendors and purchase orders</p>
         </div>
-        {canEdit && (
+        {canManageVendor && (
           <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Vendor</Button>
         )}
       </div>
       <div className="flex flex-wrap gap-3">
-        <div className="max-w-xs">
+        <div className="w-full sm:max-w-xs">
           <Input placeholder="Search vendors..." value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div className="w-40">
+          <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="all">All statuses</option>
+          </Select>
         </div>
       </div>
       {loading ? (
@@ -307,10 +362,10 @@ export default function Vendors() {
       ) : vendors.length === 0 ? (
         <EmptyState icon={Building2} title="No vendors found" text="No vendors match your search criteria" />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium">Name</th>
                   <th className="text-left px-4 py-3 font-medium">Contact Person</th>
@@ -321,14 +376,14 @@ export default function Vendors() {
                   <th className="text-left px-4 py-3 font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {vendors.map(v => (
-                  <tr key={v.id} className="hover:bg-gray-50">
+                  <tr key={v.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">{v.name}</td>
-                    <td className="px-4 py-3 text-gray-500">{v.contact_person || '-'}</td>
-                    <td className="px-4 py-3 text-gray-500">{v.phone || '-'}</td>
-                    <td className="px-4 py-3 text-gray-500">{v.city || '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{v.ntn_strn || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">{v.contact_person || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">{v.phone || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">{v.city || '-'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{[v.ntn, v.strn].filter(Boolean).join(' / ') || '-'}</td>
                     <td className="px-4 py-3">{statusBadge(v.status)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1">
@@ -337,11 +392,11 @@ export default function Vendors() {
                         {canCreatePO && (
                           <button onClick={() => openCreatePo(v)} className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="Create PO"><PlusCircle size={16} /></button>
                         )}
-                        {canEdit && (
-                          <>
-                            <button onClick={() => setModal({ open: true, item: v })} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="Edit"><Edit3 size={16} /></button>
-                            <button onClick={() => setDeleteConfirm({ open: true, id: v.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600" title="Delete"><Trash2 size={16} /></button>
-                          </>
+                        {canManageVendor && (
+                          <button onClick={() => setModal({ open: true, item: v })} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="Edit"><Edit3 size={16} /></button>
+                        )}
+                        {canDeleteVendor && v.status !== 'inactive' && (
+                          <button onClick={() => setDeleteConfirm({ open: true, id: v.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600" title="Deactivate"><Trash2 size={16} /></button>
                         )}
                       </div>
                     </td>
@@ -357,13 +412,13 @@ export default function Vendors() {
         <VendorForm data={modal.item} onSave={handleSave} onCancel={() => setModal({ open: false, item: null })} />
       </Modal>
 
-      <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this vendor?" />
+      <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Deactivate this vendor? It will be hidden from the list and cannot receive new purchase orders. Vendors with open POs cannot be deactivated." confirmLabel="Deactivate" />
 
       {/* Purchase Orders / Overview Modal */}
       <Modal isOpen={poModal.open} onClose={() => { setPoModal({ open: false, vendor: null }); setPos([]); setPoSearch(''); setPoStatusFilter(''); setOverviewTab('pos'); setOverview(null); setPayTypeFilter('') }} title={overviewTab === 'payments' ? `Payments: ${poModal.vendor?.name}` : `Purchase Orders: ${poModal.vendor?.name}`} size="max-w-3xl">
         <div className="space-y-4">
           {canSeePayments && (
-            <div className="flex gap-1 border-b border-gray-200">
+            <div className="flex gap-1 border-b border-slate-200">
               {['pos', 'payments'].map(tab => (
                 <button
                   key={tab}
@@ -381,7 +436,7 @@ export default function Vendors() {
             <div className="space-y-4">
               <div className="flex gap-3">
                 <div className="flex-1"><Input placeholder="Search POs..." value={poSearch} onChange={e => setPoSearch(e.target.value)} /></div>
-                <div className="w-48"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="admin_approved">Admin Approved</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="cancelled">Cancelled</option></Select></div>
+                <div className="w-48"><Select value={poStatusFilter} onChange={e => setPoStatusFilter(e.target.value)}><option value="">All Status</option><option value="pending">Pending</option><option value="admin_approved">Admin Approved</option><option value="approved">Approved</option><option value="partial_received">Partial Received</option><option value="received">Received</option><option value="rejected">Rejected</option><option value="cancelled">Cancelled</option></Select></div>
               </div>
               {posLoading ? (
                 <LoadingSkeleton rows={5} cols={4} />
@@ -390,16 +445,16 @@ export default function Vendors() {
               ) : (
                 <div className="space-y-2">
                   {filteredPos.map(po => (
-                    <div key={po.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => openPoDetail(po)}>
+                    <div key={po.id} className="border border-slate-200 rounded-lg p-3 hover:bg-slate-50 cursor-pointer transition-colors" onClick={() => openPoDetail(po)}>
                       <div className="flex items-center justify-between">
                         <div className="flex items_center gap-3">
                           <span className="text-sm font-medium">#{po.po_number}</span>
-                          <span className="text-xs text-gray-400">{po.created_at ? new Date(po.created_at).toLocaleDateString() : '-'}</span>
+                          <span className="text-xs text-slate-400">{po.created_at ? new Date(po.created_at).toLocaleDateString() : '-'}</span>
                           {statusBadge(po.status)}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-semibold">{formatPKR(po.total_amount)}</span>
-                          <ChevronRight size={16} className="text-gray-400" />
+                          <ChevronRight size={16} className="text-slate-400" />
                         </div>
                       </div>
                     </div>
@@ -426,12 +481,12 @@ export default function Vendors() {
           <Input label="Approved By" value={poForm.approved_by_name} onChange={e => setPoForm({ ...poForm, approved_by_name: e.target.value })} placeholder="Name of approving authority" />
           
           {/* Items */}
-          <div className="border-t border-gray-200 pt-4">
-            <h4 className="text-sm font-semibold text-gray-700 mb-3">Items</h4>
+          <div className="border-t border-slate-200 pt-4">
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">Items</h4>
             {poForm.items.map((item, idx) => (
-              <div key={idx} className="border border-gray-200 rounded-lg p-3 space-y-3">
+              <div key={idx} className="border border-slate-200 rounded-lg p-3 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-gray-600">Item #{idx + 1}</span>
+                  <span className="text-xs font-medium text-slate-600">Item #{idx + 1}</span>
                   {poForm.items.length > 1 && (
                     <Button variant="ghost" size="sm" onClick={() => removePoItem(idx)} className="text-red-600"><X size={14} /> Remove</Button>
                   )}
@@ -448,16 +503,16 @@ export default function Vendors() {
           </div>
 
           {/* Terms & Conditions */}
-          <div className="border-t border-gray-200 pt-4">
+          <div className="border-t border-slate-200 pt-4">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-semibold text-gray-700">Terms & Conditions</h4>
+              <h4 className="text-sm font-semibold text-slate-700">Terms & Conditions</h4>
               {poForm.terms.some(t => t.id?.startsWith('vendor-')) && (
                 <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">Loaded from vendor defaults — editable for this PO</span>
               )}
             </div>
             {poForm.terms.map((term, idx) => (
               <div key={term.id || idx} className="flex items-center gap-2 mb-2">
-                <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                <span className="text-xs text-slate-500 w-6">{idx + 1}.</span>
                 <Input 
                   value={term.term_text} 
                   onChange={e => {
@@ -487,7 +542,7 @@ export default function Vendors() {
             <Button variant="secondary" size="sm" onClick={() => setPoForm({ ...poForm, terms: [...poForm.terms, { id: `custom-${Date.now()}`, term_text: '', display_order: poForm.terms.length }] })}><Plus size={14} /> Add Term</Button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200">
             <Input label="Note to Al Shafi Enterprises Accounts Dept" value={poForm.note_to_accounts} onChange={e => setPoForm({ ...poForm, note_to_accounts: e.target.value })} placeholder="Special instructions for accounts" />
             <Input label="Seller's Acceptance" value={poForm.seller_acceptance} onChange={e => setPoForm({ ...poForm, seller_acceptance: e.target.value })} placeholder="Vendor acceptance terms" />
           </div>
@@ -515,19 +570,19 @@ export default function Vendors() {
                   <Button size="sm" variant="destructive" onClick={() => handlePoDecision(poDetailModal.po.id, 'owner', false)}><XCircle size={14} /> Reject</Button>
                 </>
               )}
-              {poDetailModal.po.status === 'approved' && canEdit && (
-                <Button size="sm" variant="secondary" onClick={() => handlePoStatus(poDetailModal.po.id, 'received')}><CheckCircle size={14} /> Mark Received</Button>
+              {['approved', 'partial_received'].includes(poDetailModal.po.status) && canReceive && (
+                <Button size="sm" variant="secondary" loading={poBusy} onClick={() => handleReceiveAll(poDetailModal.po)}><CheckCircle size={14} /> Receive Goods</Button>
               )}
-              {['pending', 'admin_approved', 'approved'].includes(poDetailModal.po.status) && canEdit && (
-                <Button size="sm" variant="destructive" onClick={() => handlePoStatus(poDetailModal.po.id, 'cancelled')}><XCircle size={14} /> Cancel</Button>
+              {['pending', 'admin_approved', 'approved'].includes(poDetailModal.po.status) && canCancel && (
+                <Button size="sm" variant="destructive" loading={poBusy} onClick={() => handlePoStatus(poDetailModal.po.id, 'cancelled')}><XCircle size={14} /> Cancel</Button>
               )}
               <Button size="sm" variant="secondary" onClick={printPO}><Printer size={14} /> Print</Button>
             </div>
             {/* Approval chain progress */}
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-gray-500">Approval:</span>
+              <span className="text-slate-500">Approval:</span>
               <span className="flex items-center gap-1"><Badge variant={poDetailModal.po.admin_approval === 'approved' ? 'success' : poDetailModal.po.admin_approval === 'rejected' ? 'error' : 'warning'}>Admin: {poDetailModal.po.admin_approval || 'pending'}</Badge></span>
-              <ArrowRight size={12} className="text-gray-400" />
+              <ArrowRight size={12} className="text-slate-400" />
               <span className="flex items-center gap-1"><Badge variant={poDetailModal.po.owner_approval === 'approved' ? 'success' : poDetailModal.po.owner_approval === 'rejected' ? 'error' : 'warning'}>Owner: {poDetailModal.po.owner_approval || 'pending'}</Badge></span>
               <span className="flex items-center gap-1">{statusBadge(poDetailModal.po.status)}</span>
             </div>
@@ -602,11 +657,11 @@ export default function Vendors() {
                   {(poDetailModal.po.items || []).map((item, idx) => (
                     <tr key={idx}>
                       <td className="num">{idx + 1}</td>
-                      <td className="desc">{item.material_name}</td>
+                      <td className="desc">{item.material_name}{parseFloat(item.quantity_delivered) > 0 && <span className="no-print text-[10px] text-emerald-700 ml-1">(received {(parseFloat(item.quantity_delivered) || 0).toLocaleString()})</span>}</td>
                       <td className="qty">{(parseFloat(item.quantity) || 0).toLocaleString()}</td>
                       <td className="unit">{item.unit || 'pcs'}</td>
                       <td className="rate">{formatPKR(item.unit_price).replace('Rs. ', '')}</td>
-                      <td className="amt">{formatPKR(parseFloat(item.quantity) * parseFloat(item.unit_price)).replace('Rs. ', '')}</td>
+                      <td className="amt">{formatPKR(item.total_price ?? (parseFloat(item.quantity) * parseFloat(item.unit_price))).replace('Rs. ', '')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -737,10 +792,10 @@ function OverviewPayments({ overview, payTypeFilter, setPayTypeFilter, formatPKR
       {payments.length === 0 ? (
         <EmptyState icon={FileText} title="No payments" text="No vendor payments match this view" />
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Date</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Type</th>
@@ -750,13 +805,13 @@ function OverviewPayments({ overview, payTypeFilter, setPayTypeFilter, formatPKR
                   <th className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {payments.map(p => (
-                  <tr key={p.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-500">{p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-'}</td>
+                  <tr key={p.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 text-slate-500">{p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-'}</td>
                     <td className="px-4 py-2.5">{p.payment_type?.replace(/_/g, ' ')}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{p.project_name || '-'}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{p.po_number || '-'}</td>
+                    <td className="px-4 py-2.5 text-slate-500">{p.project_name || '-'}</td>
+                    <td className="px-4 py-2.5 text-slate-500">{p.po_number || '-'}</td>
                     <td className="px-4 py-2.5 text-right font-semibold">{formatPKR(p.amount)}</td>
                     <td className="px-4 py-2.5">{statusBadge(p.status)}</td>
                   </tr>
@@ -774,10 +829,12 @@ function VendorForm({ data, onSave, onCancel }) {
   const [form, setForm] = useState({
     id: data?.id || null, name: data?.name || '', contact_person: data?.contact_person || '',
     phone: data?.phone || '', email: data?.email || '', address: data?.address || '',
-    city: data?.city || '', ntn_strn: data?.ntn_strn || '', status: data?.status || 'active', notes: data?.notes || '',
+    city: data?.city || '', ntn: data?.ntn || '', strn: data?.strn || '', status: data?.status || 'active', payment_terms: data?.payment_terms || '',
     attn: data?.attn || '', position: data?.position || '', vendor_email: data?.vendor_email || '', vendor_tel: data?.vendor_tel || ''
   })
   const [vendorTerms, setVendorTerms] = useState(data?.default_terms || [])
+  const [removedTermIds, setRemovedTermIds] = useState([])
+  const [savingTerms, setSavingTerms] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
 
   useEffect(() => {
@@ -788,12 +845,17 @@ function VendorForm({ data, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.name) return toast.error('Vendor name required')
+    if (!form.name?.trim()) return toast.error('Vendor name required')
     onSave(form)
   }
 
   const addVendorTerm = () => setVendorTerms([...vendorTerms, { id: `new-${Date.now()}`, term_text: '', display_order: vendorTerms.length }])
-  const removeVendorTerm = (idx) => setVendorTerms(vendorTerms.filter((_, i) => i !== idx))
+  const renumber = (terms) => terms.map((t, i) => ({ ...t, display_order: i }))
+  const removeVendorTerm = (idx) => {
+    const t = vendorTerms[idx]
+    if (t?.id && !String(t.id).startsWith('new-')) setRemovedTermIds(prev => [...prev, t.id])
+    setVendorTerms(renumber(vendorTerms.filter((_, i) => i !== idx)))
+  }
   const updateVendorTerm = (idx, field, value) => {
     const terms = [...vendorTerms]
     terms[idx] = { ...terms[idx], [field]: value }
@@ -804,21 +866,38 @@ function VendorForm({ data, onSave, onCancel }) {
     const newIdx = idx + direction
     if (newIdx >= 0 && newIdx < terms.length) {
       [terms[idx], terms[newIdx]] = [terms[newIdx], terms[idx]]
-      setVendorTerms(terms)
+      setVendorTerms(renumber(terms))
     }
   }
   const saveVendorTerms = async () => {
+    const live = vendorTerms.filter(t => t.term_text?.trim())
+    setSavingTerms(true)
     try {
-      for (const term of vendorTerms) {
-        if (term.id?.startsWith('new-')) {
-          await api.post(`/vendors/${data.id}/terms`, { term_text: term.term_text, display_order: term.display_order })
+      // 1. deactivate removed terms
+      for (const id of removedTermIds) {
+        try { await api.delete(`/vendors/${data.id}/terms/${id}`) } catch (err) { if (err.response?.status !== 404) throw err }
+      }
+      // 2. create / update, with the (renumbered) display_order of each row
+      const ids = []
+      for (let i = 0; i < live.length; i++) {
+        const term = live[i]
+        if (!term.id || String(term.id).startsWith('new-')) {
+          const { data: created } = await api.post(`/vendors/${data.id}/terms`, { term_text: term.term_text.trim(), display_order: i })
+          ids.push(created.id)
         } else {
-          await api.put(`/vendors/${data.id}/terms/${term.id}`, { term_text: term.term_text, display_order: term.display_order })
+          await api.put(`/vendors/${data.id}/terms/${term.id}`, { term_text: term.term_text.trim(), display_order: i })
+          ids.push(term.id)
         }
       }
+      // 3. persist the order server-side in one call
+      if (ids.length > 0) await api.put(`/vendors/${data.id}/terms/reorder`, { termIds: ids })
+      const { data: fresh } = await api.get(`/vendors/${data.id}/terms`)
+      setVendorTerms(fresh || [])
+      setRemovedTermIds([])
       toast.success('Vendor default terms saved')
       setShowTerms(false)
-    } catch (err) { console.error(err); toast.error('Failed to save vendor terms') }
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save vendor terms') }
+    finally { setSavingTerms(false) }
   }
 
   return (
@@ -829,7 +908,8 @@ function VendorForm({ data, onSave, onCancel }) {
         <Input label="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
         <Input label="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
         <Input label="City" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} />
-        <Input label="NTN/STRN" value={form.ntn_strn} onChange={e => setForm({ ...form, ntn_strn: e.target.value })} />
+        <Input label="NTN" value={form.ntn} onChange={e => setForm({ ...form, ntn: e.target.value })} />
+        <Input label="STRN" value={form.strn} onChange={e => setForm({ ...form, strn: e.target.value })} />
         <Select label="Status" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="inactive">Inactive</option></Select>
       </div>
       <Input label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
@@ -841,13 +921,13 @@ function VendorForm({ data, onSave, onCancel }) {
         <Input label="Vendor Tel" value={form.vendor_tel} onChange={e => setForm({ ...form, vendor_tel: e.target.value })} placeholder="PO contact number" />
       </div>
       
-      <Input label="Notes" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+      <Input label="Payment Terms" value={form.payment_terms} onChange={e => setForm({ ...form, payment_terms: e.target.value })} placeholder="e.g. 30 days credit" />
       
       {/* Vendor Default Terms Management */}
-      <div className="border-t border-gray-200 pt-4">
+      <div className="border-t border-slate-200 pt-4">
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-semibold text-gray-700">Default Terms & Conditions</h4>
-          <Button variant="secondary" size="sm" onClick={() => setShowTerms(!showTerms)}>
+          <h4 className="text-sm font-semibold text-slate-700">Default Terms & Conditions</h4>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setShowTerms(!showTerms)}>
             {showTerms ? 'Hide' : 'Manage'} Terms
           </Button>
         </div>
@@ -855,20 +935,20 @@ function VendorForm({ data, onSave, onCancel }) {
           <div className="space-y-2">
             {vendorTerms.map((term, idx) => (
               <div key={term.id || idx} className="flex items-center gap-2">
-                <span className="text-xs text-gray-500 w-6">{idx + 1}.</span>
+                <span className="text-xs text-slate-500 w-6">{idx + 1}.</span>
                 <Input 
                   value={term.term_text} 
                   onChange={e => updateVendorTerm(idx, 'term_text', e.target.value)} 
                   placeholder="Term text" 
                   className="flex-1"
                 />
-                <Button variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, -1)} disabled={idx === 0} title="Move up"><ChevronRight size={14} className="-rotate-90" /></Button>
-                <Button variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, 1)} disabled={idx === vendorTerms.length - 1} title="Move down"><ChevronRight size={14} className="rotate-90" /></Button>
-                <Button variant="ghost" size="sm" onClick={() => removeVendorTerm(idx)} className="text-red-600" title="Delete"><Trash2 size={14} /></Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, -1)} disabled={idx === 0} title="Move up"><ChevronRight size={14} className="-rotate-90" /></Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => moveVendorTerm(idx, 1)} disabled={idx === vendorTerms.length - 1} title="Move down"><ChevronRight size={14} className="rotate-90" /></Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => removeVendorTerm(idx)} className="text-red-600" title="Delete"><Trash2 size={14} /></Button>
               </div>
             ))}
-            <Button variant="secondary" size="sm" onClick={addVendorTerm}><Plus size={14} /> Add Term</Button>
-            {data?.id && <Button variant="primary" size="sm" onClick={saveVendorTerms} className="ml-2">Save Terms</Button>}
+            <Button type="button" variant="secondary" size="sm" onClick={addVendorTerm}><Plus size={14} /> Add Term</Button>
+            {data?.id && <Button type="button" variant="primary" size="sm" loading={savingTerms} onClick={saveVendorTerms} className="ml-2">Save Terms</Button>}
           </div>
         )}
       </div>

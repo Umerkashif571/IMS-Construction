@@ -43,10 +43,16 @@ function createRealtimeHook(subscribeFn) {
     }, debounceMs)
 
     useEffect(() => {
-      const unsubscribe = subscribeFn((payload) => {
+      // subscribeFn returns the RealtimeChannel from .subscribe(); React needs a
+      // cleanup *function*, otherwise it throws "x is not a function" on unmount.
+      const channel = subscribeFn((payload) => {
         debouncedOnChange(payload)
       })
-      return unsubscribe
+      return () => {
+        if (channel) {
+          try { supabase.removeChannel(channel) } catch (e) { console.error('Failed to remove realtime channel:', e) }
+        }
+      }
     }, [debouncedOnChange])
   }
 }
@@ -146,13 +152,15 @@ function createRealtimeSubscription(subscribeFn) {
       }, debounceMs)
     }
 
-    const unsubscribe = subscribeFn((payload) => {
+    const channel = subscribeFn((payload) => {
       debouncedOnChange(payload)
     })
 
     return () => {
       if (timeoutRef) clearTimeout(timeoutRef)
-      unsubscribe()
+      if (channel) {
+        try { supabase.removeChannel(channel) } catch (e) { console.error('Failed to remove realtime channel:', e) }
+      }
     }
   }
 }

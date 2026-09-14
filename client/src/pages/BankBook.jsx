@@ -111,7 +111,7 @@ export default function BankBook() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Bank Book</h1>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Bank Book</h1>
           <p className="text-sm text-slate-500 mt-1">Running balance ledger for company bank accounts</p>
         </div>
         <Button onClick={() => setAddBankOpen(true)}><Plus size={15} /> Add Bank</Button>
@@ -291,10 +291,12 @@ function TxForm({ bankId, onCancel, onDone }) {
     const errs = {}
     if (!form.date) errs.date = 'Date required'
     if (!form.payee_name.trim()) errs.payee_name = 'Payee name required'
-    const inAmt = form.amount_in === '' ? 0 : parseFloat(form.amount_in)
-    const outAmt = form.amount_out === '' ? 0 : parseFloat(form.amount_out)
-    if (form.amount_in !== '' && (isNaN(inAmt) || inAmt < 0)) errs.amount_in = 'Valid amount required'
-    if (form.amount_out !== '' && (isNaN(outAmt) || outAmt < 0)) errs.amount_out = 'Valid amount required'
+    // mirror server: finite, >= 0, fits DECIMAL(15,2)
+    const inAmt = form.amount_in === '' ? 0 : Number(form.amount_in)
+    const outAmt = form.amount_out === '' ? 0 : Number(form.amount_out)
+    const badAmt = (n) => !Number.isFinite(n) || n < 0 || n >= 1e13
+    if (form.amount_in !== '' && badAmt(inAmt)) errs.amount_in = 'Valid amount required'
+    if (form.amount_out !== '' && badAmt(outAmt)) errs.amount_out = 'Valid amount required'
     if (!errs.amount_in && !errs.amount_out && inAmt === 0 && outAmt === 0) errs.amount_in = 'Amount in or out required'
     if (!errs.amount_in && !errs.amount_out && inAmt > 0 && outAmt > 0) errs.amount_in = 'Use either amount in or amount out'
     if (Object.keys(errs).length) return setErrors(errs)

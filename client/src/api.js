@@ -2,12 +2,6 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
 
-const pendingRequests = new Map()
-const cache = new Map()
-const CACHE_TTL = 30000
-
-let isRefreshing = false
-
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('ims_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
@@ -17,70 +11,22 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
-      if (window.location.pathname !== '/login' && !isRefreshing) {
-        localStorage.removeItem('ims_token')
-        localStorage.removeItem('ims_user')
-        window.location.href = '/login'
-      }
+    // Session is gone (expired token, deactivated account): clear it and go to login once.
+    if (err.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('ims_token')
+      localStorage.removeItem('ims_user')
+      window.location.href = '/login'
     }
     return Promise.reject(err)
   }
 )
 
-function getCacheKey(config) {
-  return `${config.method?.toUpperCase()}:${config.url}:${JSON.stringify(config.params)}:${JSON.stringify(config.data)}`
+// Human-readable message for any failed request, for toasts.
+export function errorMessage(err, fallback = 'Something went wrong') {
+  if (!err) return fallback
+  if (!err.response) return 'Cannot reach the server. Check your connection.'
+  return err.response.data?.error || err.response.data?.message || fallback
 }
-
-function isCacheable(config) {
-  return config.method?.toLowerCase() === 'get'
-}
-
-async function deduplicatedRequest(config) {
-  const key = getCacheKey(config)
-
-  if (isCacheable(config)) {
-    const cached = cache.get(key)
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return Promise.resolve({ ...cached.response, fromCache: true })
-    }
-  }
-
-  const existing = pendingRequests.get(key)
-  if (existing) {
-    return existing
-  }
-
-  const promise = api.request(config).then((response) => {
-    if (isCacheable(config)) {
-      cache.set(key, { response, timestamp: Date.now() })
-    }
-    pendingRequests.delete(key)
-    return response
-  }).catch((err) => {
-    pendingRequests.delete(key)
-    throw err
-  })
-
-  pendingRequests.set(key, promise)
-  return promise
-}
-
-export function clearCache(pattern) {
-  if (!pattern) {
-    cache.clear()
-    return
-  }
-  for (const key of cache.keys()) {
-    if (key.includes(pattern)) cache.delete(key)
-  }
-}
-
-export function invalidateCache(pattern) {
-  clearCache(pattern)
-}
-
-api.request = deduplicatedRequest
 
 export async function downloadFile(path, fallbackFilename) {
   const res = await api.get(path, { responseType: 'blob' })
@@ -88,8 +34,8 @@ export async function downloadFile(path, fallbackFilename) {
   let filename = fallbackFilename
   const cd = res.headers['content-disposition']
   if (cd) {
-    const m = cd.match(/filename="?([^";]+)"?/)
-    if (m) filename = m[1]
+    const m = cd.match(/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i)
+    if (m) filename = decodeURIComponent(m[1])
   }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

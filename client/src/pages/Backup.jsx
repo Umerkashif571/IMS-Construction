@@ -11,8 +11,11 @@ export default function Backup() {
   const [loading, setLoading] = useState(true)
   const [backingUp, setBackingUp] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState({ open: false, name: '' })
+  const [restoring, setRestoring] = useState(false)
 
+  // mirrors server: export/list/download are owner+admin, restore is owner-only
   const isAdmin = user?.role === 'admin' || user?.role === 'owner'
+  const canRestore = user?.role === 'owner'
 
   const load = () => {
     setLoading(true)
@@ -40,21 +43,26 @@ export default function Backup() {
     }
   }
 
+  // Download the listed file's bytes — never a fresh export
   const handleDownload = async (name) => {
     try {
-      await downloadFile('/backup/export', name)
+      await downloadFile(`/backup/download/${encodeURIComponent(name)}`, name)
     } catch (err) {
-      console.error(err); toast.error('Download failed')
+      console.error(err); toast.error('Download failed: ' + (err.response?.data?.error || err.message))
     }
   }
 
   const handleRestore = async () => {
+    setRestoring(true)
     try {
-      await api.post('/backup/restore', { filename: restoreConfirm.name })
-      toast.success('Database restored from backup')
+      const { data } = await api.post('/backup/restore', { filename: restoreConfirm.name })
+      toast.success(data?.snapshot ? `Database restored. Pre-restore snapshot saved as ${data.snapshot}` : 'Database restored from backup')
       setRestoreConfirm({ open: false, name: '' })
+      load()
     } catch (err) {
       console.error(err); toast.error('Restore failed: ' + (err.response?.data?.error || err.message))
+    } finally {
+      setRestoring(false)
     }
   }
 
@@ -66,8 +74,8 @@ export default function Backup() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Database Backup & Restore</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Export and restore database backups</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Database Backup & Restore</h1>
+          <p className="text-sm text-slate-500 mt-1">Export and restore database backups{canRestore ? '' : ' (restore is owner-only)'}</p>
         </div>
         <Button onClick={handleBackup} disabled={backingUp}>
           {backingUp ? <><RotateCcw size={16} className="animate-spin" /> Exporting...</> : <><Download size={16} /> Export Backup (SQL)</>}
@@ -104,9 +112,11 @@ export default function Backup() {
                         <Button variant="secondary" size="sm" onClick={() => handleDownload(b.name)}>
                           <Download size={14} /> Download
                         </Button>
-                        <Button variant="destructive" size="sm" onClick={() => setRestoreConfirm({ open: true, name: b.name })}>
-                          <Upload size={14} /> Restore
-                        </Button>
+                        {canRestore && (
+                          <Button variant="destructive" size="sm" onClick={() => setRestoreConfirm({ open: true, name: b.name })}>
+                            <Upload size={14} /> Restore
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -119,10 +129,12 @@ export default function Backup() {
 
       <ConfirmDialog
         isOpen={restoreConfirm.open}
-        onClose={() => setRestoreConfirm({ open: false, id: null, name: '' })}
+        onClose={() => { if (!restoring) setRestoreConfirm({ open: false, name: '' }) }}
         onConfirm={handleRestore}
         title="Confirm Database Restore"
-        message={`Are you sure you want to restore from "${restoreConfirm.name}"? This will overwrite the current database.`}
+        message={`Restore from "${restoreConfirm.name}"? Every table will be replaced with the contents of this backup. A snapshot of the current data is saved first so this can be undone.`}
+        confirmLabel="Restore"
+        loading={restoring}
       />
     </div>
   )

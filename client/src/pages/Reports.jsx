@@ -29,6 +29,16 @@ const tableConfig = {
 
 const printStyleId = 'ims-print-styles'
 
+const moneyKeys = new Set(['total_value', 'total_amount', 'unit_cost', 'total_cost', 'fuel_cost', 'maintenance_cost'])
+const dateKeys = new Set(['created_at', 'due_date', 'checked_out_date', 'returned_date', 'check_out_date', 'expected_return_date', 'actual_return_date',
+  'next_due_date', 'last_maintenance_date', 'next_maintenance_date', 'insurance_expiry', 'registration_expiry', 'order_date'])
+const looksLikeIsoDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}(T|$)/.test(v)
+const renderCell = (k, v) => {
+  if (moneyKeys.has(k)) return formatPKR(v)
+  if (dateKeys.has(k) || looksLikeIsoDate(v)) { if (!v) return '-'; const d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleDateString() }
+  return v ?? '-'
+}
+
 export default function Reports() {
   const [activeReport, setActiveReport] = useState(null)
   const [data, setData] = useState([])
@@ -62,7 +72,7 @@ export default function Reports() {
       await downloadFile(exportPath(activeReport, fmt), filename)
       toast.success(`${fmt.toUpperCase()} exported`)
     } catch (err) {
-      console.error(err); toast.error('Export failed')
+      console.error(err); toast.error('Export failed: ' + (err.response?.data?.error || err.message))
     }
   }
 
@@ -74,7 +84,7 @@ export default function Reports() {
       const { data: result } = await api.get(`/reports/${key}`)
       setData(safeArray(result))
     } catch (err) {
-      console.error(err); toast.error('Failed to load report')
+      console.error(err); toast.error('Failed to load report: ' + (err.response?.data?.error || err.message))
       setData([])
       setError(err)
     } finally {
@@ -92,8 +102,8 @@ export default function Reports() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Reports</h1>
-          <p className="text-xs text-slate-500 mt-0.5">View and export system reports</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Reports</h1>
+          <p className="text-sm text-slate-500 mt-1">View and export system reports</p>
         </div>
       </div>
 
@@ -108,17 +118,17 @@ export default function Reports() {
             <div className="flex items-start justify-between">
               <r.icon size={24} className="text-slate-600" />
             </div>
-            <h3 className="font-semibold text-gray-800 mt-2">{r.label}</h3>
-            <p className="text-xs text-gray-500 mt-1">View report data and export</p>
+            <h3 className="font-semibold text-slate-800 mt-2">{r.label}</h3>
+            <p className="text-xs text-slate-500 mt-1">View report data and export</p>
           </div>
         ))}
       </div>
 
       {/* Report Table */}
       {activeReport && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-800">{reportTypes.find(r => r.key === activeReport)?.label}</h3>
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">{reportTypes.find(r => r.key === activeReport)?.label}</h3>
             <div className="flex gap-2 no-print">
               <Button variant="secondary" size="sm" onClick={handlePrint}><Printer size={14} /> Print</Button>
               <Button variant="secondary" size="sm" onClick={() => handleExport('xlsx')}><FileSpreadsheet size={14} /> Excel</Button>
@@ -136,22 +146,17 @@ export default function Reports() {
               <h2 className="hidden print:block text-lg font-bold mb-2">{reportTypes.find(r => r.key === activeReport)?.label}</h2>
               <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600">
+                <thead className="bg-slate-50 text-slate-600">
                   <tr>
                     {cfg.cols.map(h => <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>)}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-slate-100">
                   {safeArray(data).map((row, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
+                    <tr key={idx} className="hover:bg-slate-50">
                       {cfg.keys.map(k => (
-                        <td key={k} className="px-4 py-3 text-gray-600">
-                          {k === 'total_value' || k === 'total_amount' || k === 'unit_cost' || k === 'total_cost' || k === 'fuel_cost' || k === 'maintenance_cost'
-                            ? formatPKR(row[k])
-                            : k === 'created_at' || k === 'due_date' || k === 'checked_out_date' || k === 'returned_date' || k === 'next_due_date' || k === 'last_maintenance_date' || k === 'next_maintenance_date' || k === 'insurance_expiry' || k === 'registration_expiry' || k === 'order_date'
-                            ? row[k] ? new Date(row[k]).toLocaleDateString() : '-'
-                            : row[k] ?? '-'
-                          }
+                        <td key={k} className="px-4 py-3 text-slate-600">
+                          {renderCell(k, row[k])}
                         </td>
                       ))}
                     </tr>
@@ -164,7 +169,7 @@ export default function Reports() {
             </div>
             </div>
           ) : (
-            <div className="p-4 text-center text-gray-500">Select a report to view data</div>
+            <div className="p-4 text-center text-slate-500">Select a report to view data</div>
           )}
         </div>
       )}

@@ -24,21 +24,25 @@ export default function Vehicles() {
   const [maintenanceModal, setMaintenanceModal] = useState({ open: false, vehicle: null })
   const [assignModal, setAssignModal] = useState({ open: false, vehicle: null, isReassign: false })
   const [unassignConfirm, setUnassignConfirm] = useState({ open: false, vehicle: null })
-  const [fuelForm, setFuelForm] = useState({ liters: '', cost: '', notes: '' })
-  const [maintForm, setMaintForm] = useState({ type: '', description: '', cost: '', date: '' })
+  const emptyFuel = { liters: '', cost: '', odometer_reading: '', notes: '' }
+  const [fuelForm, setFuelForm] = useState(emptyFuel)
+  const emptyMaint = { type: '', description: '', cost: '', date: '', next_due_date: '' }
+  const [maintForm, setMaintForm] = useState(emptyMaint)
   const [assignForm, setAssignForm] = useState({ project_id: '' })
   const [expanded, setExpanded] = useState(null)
   const [fuelLogs, setFuelLogs] = useState([])
   const [maintLogs, setMaintLogs] = useState([])
 
-  const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
+  // Must match server authorize() lists in server/src/routes/vehicles.js
+  const canEdit = ['owner', 'admin', 'store_manager'].includes(user?.role)
+  const canDelete = ['owner', 'admin'].includes(user?.role)
 
   const load = (q = '') => {
     setLoading(true)
-    const params = q ? `?search=${q}` : ''
+    const params = q ? `?search=${encodeURIComponent(q)}` : ''
     Promise.all([api.get(`/vehicles${params}`), api.get('/projects')])
       .then(([vRes, pRes]) => { setVehicles(vRes?.data?.data || vRes?.data || []); setProjects(pRes?.data?.data || pRes?.data || []) })
-      .catch(err => { console.error(err); toast.error('Failed to load vehicles') })
+      .catch(err => { console.error(err); toast.error(err.response?.data?.error || 'Failed to load vehicles') })
       .finally(() => setLoading(false))
   }
 
@@ -54,25 +58,36 @@ export default function Vehicles() {
 
   const handleDelete = async () => {
     try { await api.delete(`/vehicles/${deleteConfirm.id}`); toast.success('Vehicle deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { console.error(err); toast.error('Failed to delete') }
+    catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to delete') }
   }
 
   const handleFuelSubmit = async () => {
-    if (!fuelForm.liters || !fuelForm.cost) return toast.error('Liters and cost required')
+    const liters = parseFloat(fuelForm.liters), cost = parseFloat(fuelForm.cost)
+    if (!(liters > 0)) return toast.error('Liters must be greater than 0')
+    if (!(cost >= 0)) return toast.error('Cost must be 0 or more')
+    const odo = fuelForm.odometer_reading === '' ? null : parseFloat(fuelForm.odometer_reading)
+    if (odo !== null && !(odo >= 0)) return toast.error('Odometer must be 0 or more')
     try {
-      await api.post(`/vehicles/${fuelModal.vehicle.id}/fuel`, { liters: parseFloat(fuelForm.liters) || 0, cost: parseFloat(fuelForm.cost) || 0, notes: fuelForm.notes })
-      toast.success('Fuel log added'); setFuelModal({ open: false, vehicle: null }); setFuelForm({ liters: '', cost: '', notes: '' })
+      await api.post(`/vehicles/${fuelModal.vehicle.id}/fuel`, { liters, cost, odometer_reading: odo, notes: fuelForm.notes || null })
+      toast.success('Fuel log added'); setFuelModal({ open: false, vehicle: null }); setFuelForm(emptyFuel)
       if (expanded === fuelModal.vehicle.id) loadFuelLogs(fuelModal.vehicle.id)
-    } catch (err) { console.error(err); toast.error('Failed to add fuel log') }
+      if (odo !== null) load(search)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to add fuel log') }
   }
 
   const handleMaintSubmit = async () => {
-    if (!maintForm.type || !maintForm.cost) return toast.error('Type and cost required')
+    if (!maintForm.type || maintForm.cost === '') return toast.error('Type and cost required')
+    const cost = parseFloat(maintForm.cost)
+    if (!(cost >= 0)) return toast.error('Cost must be 0 or more')
     try {
-      await api.post(`/vehicles/${maintenanceModal.vehicle.id}/maintenance`, { maintenance_type: maintForm.type, description: maintForm.description, cost: parseFloat(maintForm.cost) || 0, scheduled_date: maintForm.date || null })
-      toast.success('Maintenance log added'); setMaintenanceModal({ open: false, vehicle: null }); setMaintForm({ type: '', description: '', cost: '', date: '' })
+      await api.post(`/vehicles/${maintenanceModal.vehicle.id}/maintenance`, {
+        maintenance_type: maintForm.type, description: maintForm.description || null, cost,
+        service_date: maintForm.date || null, next_due_date: maintForm.next_due_date || null,
+      })
+      toast.success('Maintenance log added'); setMaintenanceModal({ open: false, vehicle: null }); setMaintForm(emptyMaint)
       if (expanded === maintenanceModal.vehicle.id) loadMaintLogs(maintenanceModal.vehicle.id)
-    } catch (err) { console.error(err); toast.error('Failed to add maintenance log') }
+      load(search)
+    } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to add maintenance log') }
   }
 
   const handleAssignSubmit = async () => {
@@ -117,14 +132,14 @@ export default function Vehicles() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Vehicles</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Manage fleet, fuel logs, and maintenance</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Vehicles</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage fleet, fuel logs, and maintenance</p>
         </div>
         {canEdit && <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Vehicle</Button>}
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="relative max-w-xs w-full">
+        <div className="relative w-full sm:max-w-xs">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input placeholder="Search vehicles..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
@@ -154,7 +169,7 @@ export default function Vehicles() {
                     <td className="px-4 py-3">{statusBadge(v.current_status)}</td>
                     <td className="px-4 py-3 text-slate-500">{v.project_name || '-'}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{v.insurance_expiry ? new Date(v.insurance_expiry).toLocaleDateString() : '-'}</td>
-                    <td className="px-4 py-3 text-xs text-slate-500">{v.next_maintenance ? new Date(v.next_maintenance).toLocaleDateString() : '-'}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{v.next_maintenance_date ? new Date(v.next_maintenance_date).toLocaleDateString() : '-'}</td>
                     {canEdit && (
                       <td className="px-4 py-3">
                         <div className="flex gap-1">
@@ -169,7 +184,7 @@ export default function Vehicles() {
                           <button onClick={(e) => { e.stopPropagation(); setModal({ open: true, item: v }) }} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
                           <button onClick={(e) => { e.stopPropagation(); setFuelModal({ open: true, vehicle: v }) }} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Add Fuel"><Fuel size={15} /></button>
                           <button onClick={(e) => { e.stopPropagation(); setMaintenanceModal({ open: true, vehicle: v }) }} className="p-1.5 hover:bg-amber-50 rounded text-amber-600 transition-colors" title="Add Maintenance"><Wrench size={15} /></button>
-                          <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ open: true, id: v.id }) }} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
+                          {canDelete && <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ open: true, id: v.id }) }} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>}
                         </div>
                       </td>
                     )}
@@ -198,7 +213,7 @@ export default function Vehicles() {
                                 <table className="w-full text-xs">
                                   <thead className="bg-slate-50"><tr>{['Date', 'Type', 'Cost'].map(h => <th key={h} className="text-left px-3 py-2 font-semibold text-slate-500 uppercase tracking-wider">{h}</th>)}</tr></thead>
                                   <tbody className="divide-y divide-slate-100">{maintLogs.map(m => (
-                                    <tr key={m.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{m.scheduled_date ? new Date(m.scheduled_date).toLocaleDateString() : '-'}</td><td className="capitalize">{m.maintenance_type?.replace(/_/g, ' ')}</td><td>{formatPKR(m.cost)}</td></tr>
+                                    <tr key={m.id} className="hover:bg-slate-50"><td className="px-3 py-2 text-slate-500">{m.service_date ? new Date(m.service_date).toLocaleDateString() : '-'}</td><td className="capitalize">{m.maintenance_type?.replace(/_/g, ' ')}</td><td>{formatPKR(m.cost)}</td></tr>
                                   ))}</tbody>
                                 </table>
                               </div>
@@ -222,16 +237,18 @@ export default function Vehicles() {
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this vehicle?" />
       <ConfirmDialog isOpen={unassignConfirm.open} onClose={() => setUnassignConfirm({ open: false, vehicle: null })} onConfirm={handleUnassignSubmit} message={`Unassign ${unassignConfirm.vehicle?.registration_no} from project "${unassignConfirm.vehicle?.project_name}"?`} confirmText="Unassign" variant="destructive" />
 
-      <Modal isOpen={fuelModal.open} onClose={() => { setFuelModal({ open: false, vehicle: null }); setFuelForm({ liters: '', cost: '', notes: '' }) }} title={`Fuel Log: ${fuelModal.vehicle?.registration_no}`} size="max-w-sm">
+      <Modal isOpen={fuelModal.open} onClose={() => { setFuelModal({ open: false, vehicle: null }); setFuelForm(emptyFuel) }} title={`Fuel Log: ${fuelModal.vehicle?.registration_no}`} size="max-w-sm">
         <div className="space-y-5">
-          <Input label="Liters *" type="number" step="0.01" value={fuelForm.liters} onChange={e => setFuelForm({ ...fuelForm, liters: e.target.value })} placeholder="0.00" />
-          <Input label="Cost (PKR) *" type="number" step="0.01" value={fuelForm.cost} onChange={e => setFuelForm({ ...fuelForm, cost: e.target.value })} placeholder="0.00" />
+          <Input label="Liters *" type="number" step="0.01" min="0.01" value={fuelForm.liters} onChange={e => setFuelForm({ ...fuelForm, liters: e.target.value })} placeholder="0.00" />
+          <Input label="Cost (PKR) *" type="number" step="0.01" min="0" value={fuelForm.cost} onChange={e => setFuelForm({ ...fuelForm, cost: e.target.value })} placeholder="0.00" />
+          <Input label="Odometer (km)" type="number" step="1" min="0" value={fuelForm.odometer_reading} onChange={e => setFuelForm({ ...fuelForm, odometer_reading: e.target.value })}
+            placeholder={fuelModal.vehicle?.odometer_reading ? `Current: ${parseFloat(fuelModal.vehicle.odometer_reading)}` : 'Optional'} hint="Leave blank to keep the current reading" />
           <Input label="Notes" value={fuelForm.notes} onChange={e => setFuelForm({ ...fuelForm, notes: e.target.value })} placeholder="Optional notes" />
           <Button onClick={handleFuelSubmit} className="w-full"><Fuel size={16} /> Add Fuel Log</Button>
         </div>
       </Modal>
 
-      <Modal isOpen={maintenanceModal.open} onClose={() => { setMaintenanceModal({ open: false, vehicle: null }); setMaintForm({ type: '', description: '', cost: '', date: '' }) }} title={`Maintenance: ${maintenanceModal.vehicle?.registration_no}`} size="max-w-sm">
+      <Modal isOpen={maintenanceModal.open} onClose={() => { setMaintenanceModal({ open: false, vehicle: null }); setMaintForm(emptyMaint) }} title={`Maintenance: ${maintenanceModal.vehicle?.registration_no}`} size="max-w-sm">
         <div className="space-y-5">
           <Select label="Type *" value={maintForm.type} onChange={e => setMaintForm({ ...maintForm, type: e.target.value })}>
             <option value="">Select type</option>
@@ -239,8 +256,9 @@ export default function Vehicles() {
             <option value="engine">Engine</option><option value="general">General</option><option value="other">Other</option>
           </Select>
           <Input label="Description" value={maintForm.description} onChange={e => setMaintForm({ ...maintForm, description: e.target.value })} placeholder="Description" />
-          <Input label="Cost (PKR) *" type="number" step="0.01" value={maintForm.cost} onChange={e => setMaintForm({ ...maintForm, cost: e.target.value })} placeholder="0.00" />
-          <Input label="Date" type="date" value={maintForm.date} onChange={e => setMaintForm({ ...maintForm, date: e.target.value })} />
+          <Input label="Cost (PKR) *" type="number" step="0.01" min="0" value={maintForm.cost} onChange={e => setMaintForm({ ...maintForm, cost: e.target.value })} placeholder="0.00" />
+          <Input label="Service Date" type="date" value={maintForm.date} onChange={e => setMaintForm({ ...maintForm, date: e.target.value })} hint="Defaults to today" />
+          <Input label="Next Due Date" type="date" value={maintForm.next_due_date} onChange={e => setMaintForm({ ...maintForm, next_due_date: e.target.value })} hint="Optional — updates the Maint Due column" />
           <Button onClick={handleMaintSubmit} className="w-full"><Wrench size={16} /> Add Maintenance Log</Button>
         </div>
       </Modal>
@@ -259,13 +277,15 @@ export default function Vehicles() {
   )
 }
 
+const d10 = (v) => (v ? String(v).slice(0, 10) : '')
+
 function VehicleForm({ data, projects, onSave, onCancel }) {
   const [form, setForm] = useState({
     id: data?.id || null, registration_no: data?.registration_no || '', type: data?.type || '',
-    brand: data?.brand || '', model: data?.model || '', year: data?.year || '', purchase_date: data?.purchase_date || '',
-    purchase_cost: data?.purchase_cost || 0, fuel_type: data?.fuel_type || '', tank_capacity: data?.tank_capacity || 0,
-    insurance_expiry: data?.insurance_expiry || '', registration_expiry: data?.registration_expiry || '',
-    assigned_project_id: data?.assigned_project_id || '', notes: data?.notes || '', current_status: data?.current_status || ''
+    brand: data?.brand || '', model: data?.model || '', year: data?.year || '', purchase_date: d10(data?.purchase_date),
+    purchase_cost: data?.purchase_cost ?? '', fuel_type: data?.fuel_type || '', tank_capacity: data?.tank_capacity ?? '',
+    insurance_expiry: d10(data?.insurance_expiry), registration_expiry: d10(data?.registration_expiry),
+    assigned_project_id: data?.assigned_project_id || '', notes: data?.notes || '', current_status: data?.current_status || 'active'
   })
   const [errors, setErrors] = useState({})
 
@@ -276,6 +296,9 @@ function VehicleForm({ data, projects, onSave, onCancel }) {
     if (!form.type) errs.type = 'Required'
     if (!form.brand) errs.brand = 'Required'
     if (!form.model) errs.model = 'Required'
+    if (form.year !== '' && (!/^\d{4}$/.test(String(form.year)) || Number(form.year) < 1900 || Number(form.year) > 2100)) errs.year = 'Enter a 4-digit year (1900-2100)'
+    if (form.purchase_cost !== '' && !(Number(form.purchase_cost) >= 0)) errs.purchase_cost = 'Must be 0 or more'
+    if (form.tank_capacity !== '' && !(Number(form.tank_capacity) >= 0)) errs.tank_capacity = 'Must be 0 or more'
     if (Object.keys(errs).length) return setErrors(errs)
     setErrors({})
     onSave(form)
@@ -291,16 +314,16 @@ function VehicleForm({ data, projects, onSave, onCancel }) {
         </Select>
         <Input label="Brand *" value={form.brand} onChange={e => setForm({ ...form, brand: e.target.value })} error={errors.brand} />
         <Input label="Model *" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} error={errors.model} />
-        <Input label="Year" type="number" value={form.year} onChange={e => setForm({ ...form, year: e.target.value })} />
+        <Input label="Year" type="number" min="1900" max="2100" value={form.year} onChange={e => setForm({ ...form, year: e.target.value })} error={errors.year} />
         <Select label="Status" value={form.current_status} onChange={e => setForm({ ...form, current_status: e.target.value })}>
           <option value="active">Active</option><option value="under_maintenance">Under Maintenance</option><option value="idle">Idle</option><option value="retired">Retired</option>
         </Select>
         <Select label="Fuel Type" value={form.fuel_type} onChange={e => setForm({ ...form, fuel_type: e.target.value })}>
           <option value="">Select</option><option value="petrol">Petrol</option><option value="diesel">Diesel</option><option value="cng">CNG</option><option value="electric">Electric</option><option value="hybrid">Hybrid</option>
         </Select>
-        <Input label="Tank Capacity (L)" type="number" step="0.1" value={form.tank_capacity} onChange={e => setForm({ ...form, tank_capacity: e.target.value })} />
+        <Input label="Tank Capacity (L)" type="number" step="0.1" min="0" value={form.tank_capacity} onChange={e => setForm({ ...form, tank_capacity: e.target.value })} error={errors.tank_capacity} />
         <Input label="Purchase Date" type="date" value={form.purchase_date} onChange={e => setForm({ ...form, purchase_date: e.target.value })} />
-        <Input label="Purchase Cost (PKR)" type="number" value={form.purchase_cost} onChange={e => setForm({ ...form, purchase_cost: e.target.value })} />
+        <Input label="Purchase Cost (PKR)" type="number" min="0" step="0.01" value={form.purchase_cost} onChange={e => setForm({ ...form, purchase_cost: e.target.value })} error={errors.purchase_cost} />
         <Input label="Insurance Expiry" type="date" value={form.insurance_expiry} onChange={e => setForm({ ...form, insurance_expiry: e.target.value })} />
         <Input label="Registration Expiry" type="date" value={form.registration_expiry} onChange={e => setForm({ ...form, registration_expiry: e.target.value })} />
         <Select label="Assigned Project" value={form.assigned_project_id} onChange={e => setForm({ ...form, assigned_project_id: e.target.value })}>

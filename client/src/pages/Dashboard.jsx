@@ -1,19 +1,29 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package, Wifi, WifiOff, RotateCcw } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
+import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package } from 'lucide-react'
 import bannerImg from '../assets/banner-collage.jpg'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import api from '../api'
 import { StatCard, Card, CardHeader, CardContent, LoadingSkeleton, EmptyState } from '../components/ui'
 import toast from 'react-hot-toast'
-import { formatPKR } from '../format'
-import { useSupabaseChannel, useCoalescedRealtime } from '../hooks/useRealtime'
-import { supabase } from '../lib/supabase'
+import { formatPKR, formatPKRWhole } from '../format'
+import { useCoalescedRealtime } from '../hooks/useRealtime'
+
+// Large rupee amounts in a KPI tile: 'Rs 479.5M' (exact value goes in the hint)
+const compactPKR = (v) => {
+  const n = Number(v || 0)
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return `Rs ${(n / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `Rs ${(n / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `Rs ${(n / 1e3).toFixed(0)}K`
+  return `Rs ${n.toLocaleString('en-PK')}`
+}
 
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [realtimeConnected, setRealtimeConnected] = useState(true)
+  const { user } = useAuth()
 
   const loadDashboard = useCallback(() => {
     api.get('/dashboard').then(({ data }) => {
@@ -29,46 +39,10 @@ export default function Dashboard() {
     { table: 'stock_movements', event: '*' },
   ], [])
 
-  // Memoize config to prevent channel recreation on every render
-  const dashboardChannelConfig = useMemo(() => ({
-    config: {
-      broadcast: { self: true },
-      presence: { key: 'dashboard-page' },
-    },
-  }), [])
-
   useCoalescedRealtime(dashboardSubscriptions, useCallback((payloads) => {
     console.log('Coalesced realtime updates on dashboard:', payloads.length, 'events')
     loadDashboard()
   }, [loadDashboard]), { debounceMs: 500 })
-
-  // Track realtime connection status
-  useSupabaseChannel('dashboard-connection-status', dashboardChannelConfig)
-
-  useEffect(() => {
-    let channel = null
-    try {
-      channel = supabase.channel('connection-monitor-dashboard')
-      channel
-        .on('system', {}, (payload) => {
-          if (payload.type === 'connect') setRealtimeConnected(true)
-          if (payload.type === 'disconnect') setRealtimeConnected(false)
-        })
-        .subscribe()
-    } catch (e) {
-      console.error('Failed to create dashboard connection monitor channel:', e)
-    }
-
-    return () => {
-      if (channel) {
-        try {
-          supabase.removeChannel(channel)
-        } catch (e) {
-          console.error('Failed to remove dashboard connection monitor channel:', e)
-        }
-      }
-    }
-  }, [])
 
   const budgetData = useMemo(() => {
     const budgets = data?.project_budgets
@@ -94,19 +68,22 @@ export default function Dashboard() {
   }, [data?.recent_activity])
 
   const cards = [
-    { label: 'Inventory Value', value: formatPKR(data?.inventory_value), icon: DollarSign, color: 'emerald', to: '/materials' },
+    { label: 'Inventory Value', value: compactPKR(data?.inventory_value), hint: formatPKRWhole(data?.inventory_value), icon: DollarSign, color: 'emerald', to: '/materials' },
     { label: 'Active Projects', value: data?.active_projects || 0, icon: Building2, color: 'blue', to: '/projects' },
     { label: 'Vehicles in Use', value: data?.vehicles_active || 0, icon: Truck, color: 'amber', to: '/vehicles' },
     { label: 'Tools Checked Out', value: data?.tools_checked_out || 0, icon: Wrench, color: 'purple', to: '/tools' },
     { label: 'Low Stock Alerts', value: data?.low_stock_count || 0, icon: AlertTriangle, color: 'red', to: '/materials?low_stock=true' },
-    { label: 'Maintenance Due', value: data?.maintenance_due_count || 0, icon: Settings, color: 'amber', to: '/tools?maintenance_due=true' },
+    { label: 'Maintenance Due', value: data?.maintenance_due_count || 0, icon: Settings, color: 'amber', to: '/vehicles' },
   ]
 
   const COLORS = ['#059669', '#3b82f6', '#f59e0b', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316']
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  const firstName = (user?.full_name || '').trim().split(/\s+/)[0] || 'there'
 
   if (loading) return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="h-28 skeleton rounded-xl" />
         ))}
@@ -120,31 +97,22 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="w-full h-44 rounded-xl overflow-hidden" style={{ backgroundImage: `url(${bannerImg})`, backgroundSize: 'cover', backgroundPosition: 'center' }}>
-      </div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Dashboard</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Enterprise Asset Management Overview</p>
+      {/* Welcome banner */}
+      <section className="relative overflow-hidden rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-900/10">
+        <img src={bannerImg} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover opacity-60" />
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/60 to-slate-950/10" />
+        <div className="relative flex min-h-[7.5rem] flex-col justify-end gap-1 p-5 sm:min-h-[10rem] sm:p-7">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-400">{greeting}</p>
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Welcome back, {firstName}</h1>
+          <p className="max-w-xl text-sm text-slate-300">Here's what's happening across your sites, stores and fleet today.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
-            <span className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-            <span className="text-xs font-medium text-slate-600">
-              {realtimeConnected ? 'Live' : 'Offline'}
-            </span>
-          </div>
-          <span className="text-[11px] text-slate-400 bg-slate-100 px-2.5 py-1 rounded-full font-medium">
-            {new Date().toLocaleDateString('en-PK', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-          </span>
-        </div>
-      </div>
+      </section>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
         {cards.map(c => (
           <Link key={c.label} to={c.to}>
-            <StatCard label={c.label} value={c.value} icon={c.icon} color={c.color} />
+            <StatCard label={c.label} value={c.value} hint={c.hint} icon={c.icon} color={c.color} />
           </Link>
         ))}
       </div>

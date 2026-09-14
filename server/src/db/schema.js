@@ -7,6 +7,12 @@ async function createSchema(pool = require('./pool')) {
     await client.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
     await client.query(`CREATE EXTENSION IF NOT EXISTS "pg_trgm"`);
 
+    // Gate pass numbering: a sequence instead of Date.now() so two stock-outs in the same
+    // millisecond cannot collide on gate_passes.gate_pass_no UNIQUE.
+    await client.query(`CREATE SEQUENCE IF NOT EXISTS gate_pass_seq START 1`);
+    // PO numbering (vendors.js / purchase_orders.js draw from this sequence)
+    await client.query(`CREATE SEQUENCE IF NOT EXISTS po_number_seq START 1`);
+
     // Users & Auth
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -616,6 +622,16 @@ async function createSchema(pool = require('./pool')) {
 
     // ============ FINANCE MODULE ============
 
+    // Banks (company-wide, independent of projects)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS banks (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name VARCHAR(255) NOT NULL,
+        account_number VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // Salaries
     await client.query(`
       CREATE TABLE IF NOT EXISTS salaries (
@@ -624,6 +640,7 @@ async function createSchema(pool = require('./pool')) {
         employee_name VARCHAR(255) NOT NULL,
         amount DECIMAL(15, 2) NOT NULL,
         month DATE NOT NULL,
+        bank_id UUID REFERENCES banks(id),
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
@@ -638,6 +655,7 @@ async function createSchema(pool = require('./pool')) {
         description VARCHAR(255) NOT NULL,
         amount DECIMAL(15, 2) NOT NULL,
         week_of DATE NOT NULL,
+        bank_id UUID REFERENCES banks(id),
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
@@ -657,19 +675,10 @@ async function createSchema(pool = require('./pool')) {
         bill_number VARCHAR(255),
         ipc_percent_complete DECIMAL(5, 2),
         payment_date DATE NOT NULL,
+        bank_id UUID REFERENCES banks(id),
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
-      )
-    `);
-
-    // Banks (company-wide, independent of projects)
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS banks (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name VARCHAR(255) NOT NULL,
-        account_number VARCHAR(255),
-        created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
 
@@ -683,6 +692,9 @@ async function createSchema(pool = require('./pool')) {
         cheque_no VARCHAR(255),
         amount_in DECIMAL(15, 2) DEFAULT 0,
         amount_out DECIMAL(15, 2) DEFAULT 0,
+        source_type VARCHAR NOT NULL DEFAULT 'manual',
+        source_ref UUID,
+        source_party VARCHAR,
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
@@ -697,6 +709,8 @@ async function createSchema(pool = require('./pool')) {
         amount DECIMAL(15, 2) NOT NULL,
         received_date DATE NOT NULL,
         description VARCHAR(255),
+        bank_id UUID REFERENCES banks(id),
+        received_from VARCHAR,
         created_by UUID REFERENCES users(id),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         status VARCHAR(50) DEFAULT 'active' CHECK (status IN ('active', 'deletion_requested', 'deleted'))
@@ -794,6 +808,20 @@ async function createSchema(pool = require('./pool')) {
         ALTER TABLE deletion_requests ADD CONSTRAINT deletion_requests_transaction_type_check
           CHECK (transaction_type IN ('salary', 'petty_cash', 'vendor_payment', 'bank_transaction', 'amount_received', 'petty_cash_utilization'));
       END $$;
+    `);
+
+    // ============ BANK BOOK LINKING (migration 2026-08-10, idempotent) ============
+    // finance entries carry the bank they moved through; bank_transactions carry their origin.
+    await client.query(`
+      ALTER TABLE vendor_payments ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id);
+      ALTER TABLE salaries ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id);
+      ALTER TABLE petty_cash ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id);
+      ALTER TABLE amount_received ADD COLUMN IF NOT EXISTS bank_id UUID REFERENCES banks(id);
+      ALTER TABLE amount_received ADD COLUMN IF NOT EXISTS received_from VARCHAR;
+      ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS source_party VARCHAR;
+      ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS source_type VARCHAR NOT NULL DEFAULT 'manual';
+      ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS source_ref UUID;
+      CREATE INDEX IF NOT EXISTS idx_bank_tx_source ON bank_transactions (source_type, source_ref);
     `);
 
     // Petty Cash utilization entries (partial-spend ledger on disbursements)

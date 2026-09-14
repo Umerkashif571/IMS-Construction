@@ -2,28 +2,32 @@
 
 @theme {
   --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
 }
 
+html { -webkit-text-size-adjust: 100%; }
 body {
   font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #f1f5f9; }
-::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #64748b; }
+/* Scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid #f8fafc; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* Print styles */
+/* Print */
 @media print {
   body { background: white !important; }
   .no-print { display: none !important; }
 }
 
-/* Loading skeleton animation */
+/* Loading skeleton */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -31,32 +35,79 @@ body {
 .skeleton {
   background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 4px;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
 }
 
-/* Card hover effect */
-.card-hover {
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.card-hover:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+/* Overlay / dialog motion */
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.985) } to { opacity: 1; transform: none } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(24px) } to { opacity: 1; transform: none } }
+.animate-fade-in { animation: fade-in .15s ease-out both; }
+.animate-pop { animation: pop .18s cubic-bezier(.2,.8,.2,1) both; }
+.animate-slide-up { animation: slide-up .22s cubic-bezier(.2,.8,.2,1) both; }
+.animate-in { animation: pop .18s cubic-bezier(.2,.8,.2,1) both; } /* legacy class name used by a few pages */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in, .animate-pop, .animate-slide-up, .animate-in, .card-hover { animation: none !important; transition: none !important; }
 }
 
-/* Table row subtle animation */
-tbody tr {
-  transition: background-color 0.1s ease;
-}
+/* Card hover */
+.card-hover { transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease; }
+.card-hover:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(15,23,42,.08); }
 
 /* Badge base */
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
+  gap: 5px;
+  padding: 2px 9px;
   border-radius: 9999px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  line-height: 1.25rem;
+  line-height: 1.2rem;
+  white-space: nowrap;
+  text-transform: capitalize;
 }
+
+/* ------------------------------------------------------------------ */
+/* Data tables — one look for every table in the app.                 */
+/* Unlayered rules outrank Tailwind utilities, so the hand-written      */
+/* px-4/py-3/font-medium classes on the 27 tables are normalised here. */
+/* ------------------------------------------------------------------ */
+main table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
+main thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: #f8fafc;
+  padding: 0.625rem 1rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+main tbody td {
+  padding: 0.75rem 1rem;
+  color: #334155;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+main tbody tr:last-child td { border-bottom: 0; }
+main tbody tr { transition: background-color .1s ease; }
+main tbody tr:hover td { background: #f8fafc; }
+main tbody tr.cursor-pointer:hover td { background: #fffbeb; }
+main table .text-xs td, main table.text-xs td { font-size: 0.75rem; padding: 0.5rem 0.75rem; }
+main table.text-xs thead th { padding: 0.5rem 0.75rem; }
+
+/* Small screens: keep cells on one line; the overflow-x-auto wrapper scrolls sideways. */
+@media (max-width: 767px) {
+  main table th, main table td { white-space: nowrap; }
+}
+
+/* Focus ring for anything interactive that isn't already styled */
+:where(button, a, [role="button"]):focus-visible { outline: 2px solid #f59e0b; outline-offset: 2px; }
+:where(input, select, textarea):focus-visible { outline: none; }
+
+/* Line clamp helper used by notifications */
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

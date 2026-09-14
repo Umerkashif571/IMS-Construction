@@ -16,31 +16,20 @@ async function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  // The token carries the user identity signed at login, so reads can be
-  // served without an extra round trip to the database. Mutations still
-  // verify the account is active (cheap indexed lookup) so deactivated
-  // users cannot keep writing before their token expires.
-  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
-    req.user = {
-      id: decoded.id,
-      email: decoded.email,
-      full_name: decoded.full_name,
-      role: decoded.role
-    };
-    return next();
-  }
-
+  // Role and active flag always come from the database, never from the token:
+  // a demoted or deactivated user must lose access immediately, not when the
+  // 24h token expires. One indexed primary-key lookup per request.
   try {
     const { rows } = await pool.query(
-      'SELECT id, is_active FROM users WHERE id = $1',
+      'SELECT id, email, full_name, role, is_active FROM users WHERE id = $1',
       [decoded.id]
     );
     if (rows.length === 0 || !rows[0].is_active) return res.status(401).json({ error: 'Account deactivated' });
     req.user = {
-      id: decoded.id,
-      email: decoded.email,
-      full_name: decoded.full_name,
-      role: decoded.role
+      id: rows[0].id,
+      email: rows[0].email,
+      full_name: rows[0].full_name,
+      role: rows[0].role
     };
     next();
   } catch (err) {
@@ -58,4 +47,17 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { authenticate, authorize };
+// Role groups — keep in sync with the sidebar role lists in client/src/components/Layout.jsx.
+// Reference data (materials, vendors, warehouses, projects) stays readable by every signed-in
+// role because most pages need it for dropdowns; these groups gate the module-specific reads.
+const ROLES = {
+  ALL: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'],
+  INVENTORY: ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff'],
+  FLEET: ['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff'],
+  PROCUREMENT: ['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance'],
+  REPORTS: ['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff'],
+  GATEPASS: ['owner', 'admin', 'store_manager', 'manager', 'staff'],
+  FINANCE: ['owner', 'admin', 'finance'],
+};
+
+module.exports = { authenticate, authorize, ROLES };

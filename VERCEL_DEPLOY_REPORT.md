@@ -47,7 +47,7 @@ Date: 2026-08-09 (local verification complete; deployment not yet run)
 - Syntax-checked: index.js, app.js, api/index.js, bootstrap.js, pool.js, vercel.json (JSON.parse).
 
 ## Env vars required in Vercel dashboard
-- `DATABASE_URL` — Supabase pooler URL (`postgresql://postgres.djaxnbusmvdukkkfbgbe:supabaseumer@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres`)
+- `DATABASE_URL` — Supabase pooler URL (`postgresql://postgres.<ref>:<PASSWORD-ROTATED>@aws-0-<region>.pooler.supabase.com:6543/postgres`)
 - `JWT_SECRET` — same as server/.env
 - `JWT_EXPIRES_IN` (if used)
 - `CORS_ORIGIN` — Vercel production domain if custom origin not auto-detected
