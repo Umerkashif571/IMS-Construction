@@ -2,7 +2,7 @@
   "version": 2,
   "regions": ["sin1"],
   "installCommand": "npm install && npm --prefix server install && npm --prefix client install",
-  "buildCommand": "cd client && npm run build && cp -r dist ../server/public",
+  "buildCommand": "cd client && npm run build && node -e \"const fs=require('fs'); const path=require('path'); const src=path.join(__dirname,'dist'); const dest=path.join(__dirname,'../server/public'); fs.cpSync(src, dest, {recursive:true}); console.log('Copied client/dist to server/public')\"",
   "builds": [
     { "src": "api/index.js", "use": "@vercel/node" }
   ],
