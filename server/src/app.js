@@ -161,13 +161,13 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
 // Production frontend serving
 if (isProduction) {
-  const distDir = path.join(__dirname, '..', '..', 'client', 'dist');
+  const distDir = path.join(__dirname, '..', 'public');
   if (fs.existsSync(path.join(distDir, 'index.html'))) {
     app.use(express.static(distDir));
     app.get(/^(?!\/api\/).*/, (req, res) => res.sendFile(path.join(distDir, 'index.html')));
     console.log(`Serving client build from ${distDir}`);
   } else {
-    console.warn(`WARNING: client/dist not found at ${distDir} — frontend is NOT being served`);
+    console.warn(`WARNING: frontend build not found at ${distDir} — frontend is NOT being served`);
   }
 }
 
