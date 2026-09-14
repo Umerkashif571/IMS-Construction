@@ -2,8 +2,7 @@
   "version": 2,
   "regions": ["sin1"],
   "installCommand": "npm install && npm --prefix server install && npm --prefix client install",
-  "buildCommand": "cd client && npm run build",
-  "outputDirectory": "client/dist",
+  "buildCommand": "cd client && npm run build && echo 'Build complete, checking dist:' && ls -la dist/",
   "builds": [
     { "src": "client/dist/**", "use": "@vercel/static" },
     { "src": "api/index.js", "use": "@vercel/node" }
