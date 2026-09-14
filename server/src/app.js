@@ -159,18 +159,6 @@ app.use('/api/notifications', notificationRoutes);
 // 404 for unknown API routes
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
-// Production frontend serving
-if (isProduction) {
-  const distDir = path.join(__dirname, '..', 'public');
-  if (fs.existsSync(path.join(distDir, 'index.html'))) {
-    app.use(express.static(distDir));
-    app.get(/^(?!\/api\/).*/, (req, res) => res.sendFile(path.join(distDir, 'index.html')));
-    console.log(`Serving client build from ${distDir}`);
-  } else {
-    console.warn(`WARNING: frontend build not found at ${distDir} — frontend is NOT being served`);
-  }
-}
-
 // Final error handler — never leaks stack traces to the client
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
