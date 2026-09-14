@@ -3,16 +3,29 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import api from '../api'
 import { Modal, ConfirmDialog, Table, Td, Button, Input, Select, LoadingSkeleton, EmptyState, useDebouncedValue, Pagination } from '../components/ui'
-import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket, Wifi, WifiOff, RotateCcw } from 'lucide-react'
+import { Plus, Search, Package, History, ArrowDownToLine, ArrowUpFromLine, Edit3, Trash2, ExternalLink, CircleAlert, Ticket, Wifi, WifiOff, RotateCcw, X } from 'lucide-react'
 import { GatePassDetail } from './GatePass'
 import toast from 'react-hot-toast'
 import { formatPKR } from '../format'
 import { useSupabaseChannel, useCoalescedRealtime } from '../hooks/useRealtime'
-import { useCategories, useProjects, useWarehouses } from '../hooks/useReferenceData'
+import { useCategories, useProjects, useWarehouses, useVendors } from '../hooks/useReferenceData'
 import { supabase } from '../lib/supabase'
 
 // Safe array extraction from API responses which may return { data: [], pagination: {} } or arrays directly
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+
+// Escape user-supplied values before they are interpolated into printable HTML
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+
+// Local calendar date as YYYY-MM-DD (toISOString would shift the day in UTC+ timezones)
+const pad2 = n => String(n).padStart(2, '0')
+const localDay = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+
+// Role gates mirror server/src/routes/materials.js authorize() lists
+const MANAGE_ROLES = ['owner', 'admin', 'store_manager']
+const DELETE_ROLES = ['owner', 'admin']
+const STOCK_ROLES = ['owner', 'admin', 'store_manager', 'manager', 'staff']
+const PROJECT_PARAMS = { limit: 200 }
 
 export default function Materials() {
   const { user } = useAuth()
@@ -25,7 +38,7 @@ export default function Materials() {
   const [detailModal, setDetailModal] = useState({ open: false, material: null, transactions: [] })
   const [dateFilter, setDateFilter] = useState({ mode: 'all', from: '', to: '' })
   const [stockInModal, setStockInModal] = useState({ open: false, material: null })
-  const [stockInQty, setStockInQty] = useState({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' })
+  const [stockInQty, setStockInQty] = useState({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: localDay(new Date()), transaction_type: '', po_id: '' })
   const [stockInLoading, setStockInLoading] = useState(false)
   const [availablePos, setAvailablePos] = useState([])
   const [stockOutModal, setStockOutModal] = useState({ open: false, material: null })
@@ -35,10 +48,17 @@ export default function Materials() {
   const [realtimeConnected, setRealtimeConnected] = useState(true)
   const [materialsPage, setMaterialsPage] = useState(1)
   const [materialsTotalPages, setMaterialsTotalPages] = useState(1)
+  const [materialsTotal, setMaterialsTotal] = useState(0)
+  // /materials?low_stock=true (Dashboard "Low Stock Alerts" link) filters server-side
+  const [searchParams, setSearchParams] = useSearchParams()
+  const lowStockOnly = searchParams.get('low_stock') === 'true'
+  const loadRequestIdRef = useRef(0)
+  const prevSearchRef = useRef('|false')
 
   const { data: categories, loading: categoriesLoading, invalidate: invalidateCategories } = useCategories()
-  const { data: projects, loading: projectsLoading, invalidate: invalidateProjects } = useProjects({ page: materialsPage, search: debouncedSearch })
+  const { data: projects, loading: projectsLoading, invalidate: invalidateProjects } = useProjects(PROJECT_PARAMS)
   const { data: warehouses, loading: warehousesLoading, invalidate: invalidateWarehouses } = useWarehouses()
+  const { data: vendors } = useVendors()
 
   const detailRequestIdRef = useRef(0)
 
@@ -56,31 +76,51 @@ export default function Materials() {
     },
   }), [])
 
-  const load = useCallback((page = 1, q = '') => {
+  const PAGE_SIZE = 50
+  const load = useCallback((page = 1, q = '', lowStock = false) => {
+    const requestId = ++loadRequestIdRef.current
     setLoading(true)
     const params = new URLSearchParams()
     if (q) params.set('search', q)
-    params.set('page', page)
-    params.set('limit', 50)
+    if (lowStock) params.set('low_stock', 'true')
+    params.set('page', Number.isInteger(page) && page > 0 ? page : 1)
+    params.set('limit', PAGE_SIZE)
     api.get(`/materials?${params.toString()}`)
       .then(({ data }) => {
+        if (requestId !== loadRequestIdRef.current) return // stale response
         setMaterials(safeArray(data))
-        setMaterialsPage(data.pagination?.page || page)
         setMaterialsTotalPages(data.pagination?.totalPages || 1)
+        setMaterialsTotal(data.pagination?.total ?? safeArray(data).length)
       })
-      .catch(err => { console.error(err); toast.error('Failed to load materials') })
-      .finally(() => setLoading(false))
+      .catch(err => { if (requestId === loadRequestIdRef.current) { console.error(err); toast.error(err.response?.data?.error || 'Failed to load materials') } })
+      .finally(() => { if (requestId === loadRequestIdRef.current) setLoading(false) })
   }, [])
 
-  useEffect(() => { load(materialsPage, debouncedSearch) }, [debouncedSearch, materialsPage, load])
+  // Single loader: a new search/filter resets to page 1, otherwise (page, search, filter) drives the request
+  useEffect(() => {
+    const key = `${debouncedSearch}|${lowStockOnly}`
+    if (prevSearchRef.current !== key) {
+      prevSearchRef.current = key
+      if (materialsPage !== 1) { setMaterialsPage(1); return }
+    }
+    load(materialsPage, debouncedSearch, lowStockOnly)
+  }, [debouncedSearch, lowStockOnly, materialsPage, load])
+
+  const reload = useCallback(() => load(materialsPage, debouncedSearch, lowStockOnly), [load, materialsPage, debouncedSearch, lowStockOnly])
+
+  const clearLowStock = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('low_stock')
+    setSearchParams(next, { replace: true })
+  }
 
   useCoalescedRealtime(materialsSubscriptions, useCallback((payloads) => {
     console.log('Coalesced realtime updates on materials:', payloads.length, 'events')
-    load(materialsPage, search)
+    reload()
     invalidateCategories()
     invalidateProjects()
     invalidateWarehouses()
-  }, [load, search, materialsPage, invalidateCategories, invalidateProjects, invalidateWarehouses]), { debounceMs: 500 })
+  }, [reload, invalidateCategories, invalidateProjects, invalidateWarehouses]), { debounceMs: 500 })
 
   // Track realtime connection status
   useSupabaseChannel('materials-connection-status', materialsChannelConfig)
@@ -123,10 +163,10 @@ export default function Materials() {
     endOfWeek.setDate(startOfWeek.getDate() + 6)
     endOfWeek.setHours(23, 59, 59, 999)
     switch (mode) {
-      case 'last-week': { const s = new Date(startOfWeek); s.setDate(s.getDate() - 7); const e = new Date(endOfWeek); e.setDate(e.getDate() - 7); return { from: s.toISOString().slice(0, 10), to: e.toISOString().slice(0, 10) } }
-      case 'last-month': { const s = new Date(y, m - 1, 1); const e = new Date(y, m, 0, 23, 59, 59, 999); return { from: s.toISOString().slice(0, 10), to: e.toISOString().slice(0, 10) } }
-      case 'current-week': return { from: startOfWeek.toISOString().slice(0, 10), to: endOfWeek.toISOString().slice(0, 10) }
-      case 'current-month': { const s = new Date(y, m, 1); const e = new Date(y, m + 1, 0, 23, 59, 59, 999); return { from: s.toISOString().slice(0, 10), to: e.toISOString().slice(0, 10) } }
+      case 'last-week': { const s = new Date(startOfWeek); s.setDate(s.getDate() - 7); const e = new Date(endOfWeek); e.setDate(e.getDate() - 7); return { from: localDay(s), to: localDay(e) } }
+      case 'last-month': { const s = new Date(y, m - 1, 1); const e = new Date(y, m, 0); return { from: localDay(s), to: localDay(e) } }
+      case 'current-week': return { from: localDay(startOfWeek), to: localDay(endOfWeek) }
+      case 'current-month': { const s = new Date(y, m, 1); const e = new Date(y, m + 1, 0); return { from: localDay(s), to: localDay(e) } }
       default: return null
     }
   }
@@ -137,21 +177,25 @@ export default function Materials() {
     return getDateRange(dateFilter.mode)
   }, [dateFilter])
 
-  const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
-
-  useEffect(() => { load(debouncedSearch) }, [debouncedSearch, load])
+  const canManage = MANAGE_ROLES.includes(user?.role)
+  const canDelete = DELETE_ROLES.includes(user?.role)
+  const canStock = STOCK_ROLES.includes(user?.role)
 
   const handleSave = async (form) => {
     try {
-      if (form.id) { await api.put(`/materials/${form.id}`, form); toast.success('Material updated') }
+      if (form.id) {
+        // quantity is never edited here: stock changes only through stock-in / stock-out (ledger)
+        const { id, quantity, ...payload } = form
+        await api.put(`/materials/${id}`, payload); toast.success('Material updated')
+      }
       else { await api.post('/materials', form); toast.success('Material created') }
-      setModal({ open: false, item: null }); load(search)
+      setModal({ open: false, item: null }); reload()
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/materials/${deleteConfirm.id}`); toast.success('Material deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { console.error(err); toast.error('Failed to delete') }
+    try { await api.delete(`/materials/${deleteConfirm.id}`); toast.success('Material deleted'); setDeleteConfirm({ open: false, id: null }); reload() }
+    catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to delete') }
   }
 
   const openDetail = useCallback(async (material, from = null, to = null) => {
@@ -176,7 +220,7 @@ export default function Materials() {
     } catch (err) {
       if (currentRequestId === detailRequestIdRef.current) {
         console.error(err)
-        toast.error('Failed to load transactions')
+        toast.error(err.response?.data?.error || 'Failed to load transactions')
       }
     }
   }, [])
@@ -190,7 +234,6 @@ export default function Materials() {
   }, [dateFilter, detailModal.open, detailModal.material, openDetail])
 
   // Deep link: /materials?material=<id> opens the material detail modal
-  const [searchParams] = useSearchParams()
   const materialParam = searchParams.get('material')
   useEffect(() => {
     if (!materialParam) return
@@ -217,9 +260,9 @@ export default function Materials() {
       await api.post(`/materials/${stockInModal.material.id}/stock-in`, payload)
       toast.success('Stock in recorded')
       setStockInModal({ open: false, material: null })
-      setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' })
+      setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: localDay(new Date()), transaction_type: '', po_id: '' })
       setAvailablePos([])
-      load(search)
+      reload()
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock in') }
     finally { setStockInLoading(false) }
   }
@@ -243,7 +286,7 @@ export default function Materials() {
       if (data.gate_pass) {
         setGpPopup({ open: true, gp: data.gate_pass })
       } else {
-        load(search)
+        reload()
       }
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to record stock out') }
     finally { setStockOutLoading(false) }
@@ -256,8 +299,8 @@ export default function Materials() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Materials Inventory</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Manage stock levels, track movements</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Materials Inventory</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage stock levels, track movements</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
@@ -266,7 +309,7 @@ export default function Materials() {
               {realtimeConnected ? 'Live' : 'Offline'}
             </span>
           </div>
-          {canEdit && (
+          {canManage && (
             <Button onClick={() => setModal({ open: true, item: {} })}>
               <Plus size={16} /> Add Material
             </Button>
@@ -275,7 +318,7 @@ export default function Materials() {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="relative max-w-xs w-full">
+        <div className="relative w-full sm:max-w-xs">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             placeholder="Search materials..."
@@ -284,6 +327,12 @@ export default function Materials() {
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
           />
         </div>
+        {lowStockOnly && (
+          <button type="button" onClick={clearLowStock} title="Clear filter"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200 hover:bg-red-100">
+            <CircleAlert size={13} /> Low stock only <X size={13} />
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -298,8 +347,8 @@ export default function Materials() {
               { label: 'Location' }, { label: 'Actions', align: 'center' },
             ]}
             empty={
-              <EmptyState icon={Package} title="No materials found" text="Add your first material to start tracking inventory"
-                action={canEdit ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Material</Button> : null}
+              <EmptyState icon={Package} title={lowStockOnly ? 'No low-stock materials' : 'No materials found'} text={lowStockOnly ? 'Every material is above its reorder level' : 'Add your first material to start tracking inventory'}
+                action={canManage ? <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Material</Button> : null}
               />
             }
           >
@@ -324,18 +373,18 @@ export default function Materials() {
               <Td><span className="text-slate-500">{m.storage_location || '-'}</span></Td>
               <Td align="center">
                 <div className="flex items-center justify-center gap-1">
-                  {canEdit && (
+                  {canStock && (
                     <>
                       <button onClick={() => {
   setStockInModal({ open: true, material: m });
-  setStockInQty({ quantity: '', warehouse_id: m.warehouse_id || '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' });
+  setStockInQty({ quantity: '', warehouse_id: m.warehouse_id || '', notes: '', source: '', received_by: '', date: localDay(new Date()), transaction_type: '', po_id: '' });
   api.get('/purchase-orders').then(({ data }) => setAvailablePos((data?.data || []).filter(p => ['approved', 'partial_received'].includes(p.status)))).catch(() => {});
 }} className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Stock In"><ArrowDownToLine size={15} /></button>
                       <button onClick={() => { setStockOutModal({ open: true, material: m }); setStockOutForm({ quantity: '', project_id: '', warehouse_id: m.warehouse_id || '', location: '', driver_name: '', vehicle_number: '', notes: '', transaction_type: 'project_issue' }) }} className="p-1.5 hover:bg-amber-50 rounded text-amber-600 transition-colors" title="Stock Out"><ArrowUpFromLine size={15} /></button>
-                      <button onClick={() => setModal({ open: true, item: m })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
-                      <button onClick={() => setDeleteConfirm({ open: true, id: m.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
                     </>
                   )}
+                  {canManage && <button onClick={() => setModal({ open: true, item: m })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>}
+                  {canDelete && <button onClick={() => setDeleteConfirm({ open: true, id: m.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>}
                   <button onClick={() => { const range = getCurrentDateRange(); openDetail(m, range.from, range.to) }} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 transition-colors" title="History"><History size={15} /></button>
                 </div>
               </Td>
@@ -347,13 +396,14 @@ export default function Materials() {
           totalPages={materialsTotalPages}
           onPageChange={setMaterialsPage}
           showTotal
-          total={materialsTotalPages * 50}
+          total={materialsTotal}
+          pageSize={PAGE_SIZE}
         />
         </>
       )}
 
       <Modal isOpen={modal.open} onClose={() => setModal({ open: false, item: null })} title={modal.item?.id ? 'Edit Material' : 'Add Material'} size="max-w-2xl">
-        <MaterialForm data={modal.item} categories={categories} onSave={handleSave} onCancel={() => setModal({ open: false, item: null })} />
+        <MaterialForm data={modal.item} categories={categories} warehouses={warehouses} vendors={vendors} onSave={handleSave} onCancel={() => setModal({ open: false, item: null })} />
       </Modal>
       <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Are you sure you want to delete this material?" />
 
@@ -440,7 +490,7 @@ export default function Materials() {
         )}
       </Modal>
 
-      <Modal isOpen={stockInModal.open} onClose={() => { setStockInModal({ open: false, material: null }); setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: new Date().toISOString().slice(0, 10), transaction_type: '', po_id: '' }); setAvailablePos([]) }} title={`Stock In: ${stockInModal.material?.name}`} size="max-w-sm">
+      <Modal isOpen={stockInModal.open} onClose={() => { setStockInModal({ open: false, material: null }); setStockInQty({ quantity: '', warehouse_id: '', notes: '', source: '', received_by: '', date: localDay(new Date()), transaction_type: '', po_id: '' }); setAvailablePos([]) }} title={`Stock In: ${stockInModal.material?.name}`} size="max-w-sm">
         <div className="space-y-5">
           <div className="bg-emerald-50 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
             <Package size={16} className="text-emerald-600" />
@@ -499,7 +549,7 @@ export default function Materials() {
         </div>
       </Modal>
 
-      <Modal isOpen={gpPopup.open} onClose={() => { setGpPopup({ open: false, gp: null }); load(search) }}
+      <Modal isOpen={gpPopup.open} onClose={() => { setGpPopup({ open: false, gp: null }); reload() }}
         title={`Gate Pass Generated: ${gpPopup.gp?.gate_pass_no}`} size="max-w-2xl">
         <div className="space-y-4">
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm flex items-center gap-2">
@@ -509,6 +559,7 @@ export default function Materials() {
           <GatePassDetail gp={gpPopup.gp}
             onPrint={() => {
               const win = window.open('', '_blank')
+              if (!win) return toast.error('Pop-up blocked. Allow pop-ups to print the gate pass.')
               const g = gpPopup.gp
               const dateStr = g?.created_at ? new Date(g.created_at).toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
               win.document.write(gatePassPrintHtml(g, dateStr))
@@ -532,7 +583,7 @@ export default function Materials() {
 }
 
 function gatePassPrintHtml(gp, dateStr) {
-  return `<!DOCTYPE html><html><head><title>Gate Pass ${gp?.gate_pass_no}</title>
+  return `<!DOCTYPE html><html><head><title>Gate Pass ${esc(gp?.gate_pass_no)}</title>
     <style>
       @page { margin: 20mm; }
       * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -556,23 +607,23 @@ function gatePassPrintHtml(gp, dateStr) {
       @media print { body { padding: 0; } }
     </style></head><body><div class="page">
     <div class="letterhead">
-      <h1>AL-FAJAR CONSTRUCTION</h1>
-      <div class="sub">Engineering &amp; Contracting Division</div>
-      <div class="address">Plot # 12, Sector G-11, Islamabad - Pakistan &bull; Tel: +92-51-1234567 &bull; info@alfajar.com</div>
+      <h1>AL SHAFI ENTERPRISES</h1>
+      <div class="sub">Builders, Contractors &amp; Interior Decorators</div>
+      <div class="address">Inventory &amp; Asset Management System</div>
     </div>
     <div class="title-block"><h2>GATE PASS</h2></div>
-    <div class="gp-no"># ${gp?.gate_pass_no || ''}</div>
+    <div class="gp-no"># ${esc(gp?.gate_pass_no)}</div>
     <table class="details">
-      <tr><td>Date</td><td>${dateStr}</td></tr>
-      <tr><td>Material</td><td>${gp?.material_name || ''}</td></tr>
-      <tr><td>Quantity</td><td>${gp?.quantity || ''} ${gp?.unit || ''}</td></tr>
-      <tr><td>Project</td><td>${gp?.project_name || ''}</td></tr>
-      <tr><td>Vehicle Number</td><td>${gp?.vehicle_number || ''}</td></tr>
-      <tr><td>Driver Name</td><td>${gp?.driver_name || ''}</td></tr>
-      <tr><td>Destination</td><td>${gp?.destination || ''}</td></tr>
-      <tr><td>Issued By</td><td>${gp?.issued_by || ''}</td></tr>
-      <tr><td>Authorized By</td><td>${gp?.authorized_by || ''}</td></tr>
-      <tr><td>Notes</td><td>${gp?.notes || ''}</td></tr>
+      <tr><td>Date</td><td>${esc(dateStr)}</td></tr>
+      <tr><td>Material</td><td>${esc(gp?.material_name)}</td></tr>
+      <tr><td>Quantity</td><td>${esc(gp?.quantity)} ${esc(gp?.unit)}</td></tr>
+      <tr><td>Project</td><td>${esc(gp?.project_name)}</td></tr>
+      <tr><td>Vehicle Number</td><td>${esc(gp?.vehicle_number)}</td></tr>
+      <tr><td>Driver Name</td><td>${esc(gp?.driver_name)}</td></tr>
+      <tr><td>Destination</td><td>${esc(gp?.destination)}</td></tr>
+      <tr><td>Issued By</td><td>${esc(gp?.issued_by)}</td></tr>
+      <tr><td>Authorized By</td><td>${esc(gp?.authorized_by)}</td></tr>
+      <tr><td>Notes</td><td>${esc(gp?.notes)}</td></tr>
     </table>
     <div class="signatures">
       <div class="sig"><div class="line">Issued By Signature</div></div>
@@ -583,11 +634,12 @@ function gatePassPrintHtml(gp, dateStr) {
   </div></body></html>`
 }
 
-function MaterialForm({ data, categories, onSave, onCancel }) {
+function MaterialForm({ data, categories, warehouses, vendors, onSave, onCancel }) {
   const [form, setForm] = useState({
     id: data?.id || null, sku: data?.sku || '', name: data?.name || '', description: data?.description || '',
     category_id: data?.category_id || '', unit: data?.unit || '', quantity: data?.quantity || 0,
     reorder_level: data?.reorder_level || 0, unit_cost: data?.unit_cost || 0, storage_location: data?.storage_location || '',
+    warehouse_id: data?.warehouse_id || '', supplier_id: data?.supplier_id || '',
   })
   const [errors, setErrors] = useState({})
   const [saving, setSaving] = useState(false)
@@ -599,6 +651,10 @@ function MaterialForm({ data, categories, onSave, onCancel }) {
     if (!form.sku) errs.sku = 'SKU is required'
     if (!form.name) errs.name = 'Name is required'
     if (!form.unit) errs.unit = 'Unit is required'
+    const num = (v) => v === '' || v === null || v === undefined ? 0 : Number(v)
+    if (!form.id && (!Number.isFinite(num(form.quantity)) || num(form.quantity) < 0)) errs.quantity = 'Quantity must be 0 or more'
+    if (!Number.isFinite(num(form.reorder_level)) || num(form.reorder_level) < 0) errs.reorder_level = 'Reorder level must be 0 or more'
+    if (!Number.isFinite(num(form.unit_cost)) || num(form.unit_cost) < 0) errs.unit_cost = 'Unit cost must be 0 or more'
     if (Object.keys(errs).length) return setErrors(errs)
     setErrors({})
     setSaving(true)
@@ -617,10 +673,22 @@ function MaterialForm({ data, categories, onSave, onCancel }) {
           {categories?.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
         <Input label="Unit *" value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} placeholder="bags, tonnes, pcs" error={errors.unit} />
-        <Input label="Quantity" type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} />
-        <Input label="Reorder Level" type="number" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} />
-        <Input label="Unit Cost (PKR)" type="number" value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} />
+        {form.id ? (
+          <Input label="Quantity" type="number" value={form.quantity} disabled hint="Use Stock In / Stock Out to change stock" />
+        ) : (
+          <Input label="Opening Quantity" type="number" min="0" step="0.01" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} error={errors.quantity} />
+        )}
+        <Input label="Reorder Level" type="number" min="0" step="0.01" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} error={errors.reorder_level} />
+        <Input label="Unit Cost (PKR)" type="number" min="0" step="0.01" value={form.unit_cost} onChange={e => setForm({ ...form, unit_cost: e.target.value })} error={errors.unit_cost} />
         <Input label="Storage Location" value={form.storage_location} onChange={e => setForm({ ...form, storage_location: e.target.value })} />
+        <Select label="Warehouse" value={form.warehouse_id} onChange={e => setForm({ ...form, warehouse_id: e.target.value })}>
+          <option value="">None</option>
+          {warehouses?.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+        </Select>
+        <Select label="Supplier" value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })}>
+          <option value="">None</option>
+          {vendors?.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </Select>
       </div>
       <div>
         <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Description</label>

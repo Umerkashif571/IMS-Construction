@@ -46,19 +46,40 @@ router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => 
 
 router.put('/:id', authenticate, authorize('owner', 'admin'), async (req, res) => {
   try {
-    const { rows: target } = await pool.query('SELECT role FROM users WHERE id=$1', [req.params.id]);
+    const { rows: target } = await pool.query('SELECT id, email, full_name, role, phone, is_active FROM users WHERE id=$1', [req.params.id]);
     if (target.length === 0) return res.status(404).json({ error: 'User not found' });
     if (target[0].role === 'owner' && req.user.role !== 'owner')
       return res.status(403).json({ error: 'Owner accounts cannot be modified' });
 
-    const { full_name, role, phone, is_active } = req.body;
+    const { full_name, role, phone, is_active, password } = req.body;
+    const VALID_ROLES = ['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance'];
+    if (role !== undefined && role !== null && !VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'owner' && req.user.role !== 'owner')
       return res.status(403).json({ error: 'Only owners can assign the owner role' });
+    // Nobody may demote or deactivate their own account (prevents locking everyone out).
+    if (req.params.id === req.user.id) {
+      if (role !== undefined && role !== null && role !== req.user.role) return res.status(400).json({ error: 'You cannot change your own role' });
+      if (is_active === false) return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
+    let passwordHash = null;
+    if (password !== undefined && password !== null && password !== '') {
+      if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+      passwordHash = await bcrypt.hash(password, 10);
+    }
     const { rows } = await pool.query(
-      `UPDATE users SET full_name=COALESCE($1, full_name), role=COALESCE($2, role), phone=COALESCE($3, phone), is_active=COALESCE($4, is_active) WHERE id=$5 RETURNING id, email, full_name, role, phone, is_active`,
-      [full_name ?? null, role ?? null, phone ?? null, is_active ?? null, req.params.id]
+      `UPDATE users SET full_name=COALESCE($1, full_name), role=COALESCE($2, role), phone=COALESCE($3, phone),
+              is_active=COALESCE($4, is_active), password_hash=COALESCE($5, password_hash), updated_at=NOW()
+       WHERE id=$6 RETURNING id, email, full_name, role, phone, is_active`,
+      [full_name ?? null, role ?? null, phone ?? null, is_active ?? null, passwordHash, req.params.id]
     );
-    res.json(rows[0]);
+    const before = target[0], after = rows[0];
+    const changed = ['full_name', 'role', 'phone', 'is_active'].filter(k => before[k] !== after[k]);
+    if (passwordHash) changed.push('password');
+    await logAudit(req.user.id, req.user.full_name, req.user.role, 'updated', 'user', after.id,
+      `Updated user: ${after.full_name} (${changed.join(', ') || 'no changes'})`,
+      { before: { full_name: before.full_name, role: before.role, phone: before.phone, is_active: before.is_active },
+        after: { full_name: after.full_name, role: after.role, phone: after.phone, is_active: after.is_active } });
+    res.json(after);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 

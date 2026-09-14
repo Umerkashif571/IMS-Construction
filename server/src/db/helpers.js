@@ -64,4 +64,10 @@ async function notifyRoles(roles, type, title, message = null, link = null, enti
   }
 }
 
-module.exports = { logAudit, addActivity, createNotification, notifyRoles };
+// Next gate pass number, e.g. GP-2026-000123. Pass the transaction client when inside BEGIN.
+async function nextGatePassNo(client = pool) {
+  const { rows } = await client.query(`SELECT nextval('gate_pass_seq') AS n`);
+  return `GP-${new Date().getFullYear()}-${String(rows[0].n).padStart(6, '0')}`;
+}
+
+module.exports = { logAudit, addActivity, createNotification, notifyRoles, nextGatePassNo };

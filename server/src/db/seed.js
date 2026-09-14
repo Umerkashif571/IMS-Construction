@@ -237,14 +237,15 @@ async function seedDatabase() {
     console.log('Activity feed seeded');
 
     // === PURCHASE ORDERS ===
-    for (const [ponum, vendorKey, vname, delStatus, poStatus, amount] of [
-      ['PO-2026-001', vendorMap['Lucky Cement Ltd'], 'Lucky Cement Ltd', 'pending', 'approved', 110250000],
-      ['PO-2026-002', vendorMap['Maple Leaf Cement'], 'Maple Leaf Cement', 'partial', 'ordered', 6200000],
-      ['PO-2026-003', vendorMap['Siemens Pakistan'], 'Siemens Pakistan', 'pending', 'approved', 8750000]
+    // purchase_orders.project_id is NOT NULL (schema.js) — every demo PO must belong to a project
+    for (const [ponum, vendorKey, vname, delStatus, poStatus, amount, projName] of [
+      ['PO-2026-001', vendorMap['Lucky Cement Ltd'], 'Lucky Cement Ltd', 'pending', 'approved', 110250000, 'Bahria Town Phase 9'],
+      ['PO-2026-002', vendorMap['Maple Leaf Cement'], 'Maple Leaf Cement', 'partial', 'ordered', 6200000, 'Karachi Metro Bus Project'],
+      ['PO-2026-003', vendorMap['Siemens Pakistan'], 'Siemens Pakistan', 'pending', 'approved', 8750000, 'Blue Area Highrise Tower']
     ]) {
       await client.query(
-        `INSERT INTO purchase_orders (po_number, vendor_id, vendor_name, order_date, expected_delivery, delivery_status, status, total_amount, created_by) VALUES ($1,$2,$3,NOW() - INTERVAL '14 days',NOW() + INTERVAL '15 days',$4,$5,$6,$7)`,
-        [ponum, vendorKey, vname, delStatus, poStatus, amount, users[0].id]
+        `INSERT INTO purchase_orders (po_number, vendor_id, vendor_name, project_id, order_date, expected_delivery, delivery_status, status, total_amount, created_by) VALUES ($1,$2,$3,$4,NOW() - INTERVAL '14 days',NOW() + INTERVAL '15 days',$5,$6,$7,$8)`,
+        [ponum, vendorKey, vname, projMap[projName], delStatus, poStatus, amount, users[0].id]
       );
     }
     console.log('Purchase orders seeded');

@@ -1,9 +1,15 @@
 const express = require('express');
 const pool = require('../db/pool');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, ROLES } = require('../middleware/auth');
 const { logAudit, addActivity, notifyRoles, createNotification } = require('../db/helpers');
+const { requireUuid, isUuid, dbError } = require('../middleware/validate');
+const { d } = require('../utils/decimal');
 
 const router = express.Router();
+
+router.param('id', requireUuid);
+
+const PO_STATUSES = ['pending', 'admin_approved', 'approved', 'rejected', 'ordered', 'partial_received', 'received', 'completed', 'cancelled', 'delivered', 'returned'];
 
 const PO_JOIN = `
   SELECT po.*,
@@ -22,12 +28,16 @@ const PO_JOIN = `
 `;
 
 // List all POs with optional filters
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, authorize(...ROLES.PROCUREMENT), async (req, res) => {
   try {
     const { status, vendor_id, search, page = 1, limit = 50 } = req.query;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(200, Math.max(1, parseInt(limit) || 50));
     const offset = (pageNum - 1) * limitNum;
+
+    if (status && !PO_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status filter' });
+    if (vendor_id && !isUuid(vendor_id)) return res.status(400).json({ error: 'Invalid vendor id' });
+    if (search !== undefined && typeof search !== 'string') return res.status(400).json({ error: 'Invalid search' });
 
     let sql = `${PO_JOIN} WHERE 1=1`;
     const params = []; let idx = 1;
@@ -53,18 +63,18 @@ router.get('/', authenticate, async (req, res) => {
         totalPages: Math.ceil(total / limitNum)
       }
     });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { return dbError(res, err); }
 });
 
 // Get single PO with items and terms
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, authorize(...ROLES.PROCUREMENT), async (req, res) => {
   try {
     const { rows: po } = await pool.query(`${PO_JOIN} WHERE po.id=$1`, [req.params.id]);
     if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
     const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     const { rows: terms } = await pool.query('SELECT * FROM po_terms WHERE po_id=$1 ORDER BY display_order', [req.params.id]);
     res.json({ ...po[0], items, terms });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { return dbError(res, err); }
 });
 
 // =====================================================================
@@ -87,6 +97,9 @@ async function applyDecision(req, res, level) {
   const reasonText = reason ? String(reason).trim() : null;
 
   const client = await pool.connect();
+  let released = false;
+  // Every early exit after BEGIN must roll back, or the pooled connection goes back mid-transaction.
+  const fail = async (code, error) => { await client.query('ROLLBACK'); return res.status(code).json({ error }); };
   try {
     await client.query('BEGIN');
 
@@ -94,26 +107,29 @@ async function applyDecision(req, res, level) {
       'SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE',
       [id]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'PO not found' });
+    if (rows.length === 0) return fail(404, 'PO not found');
     const po = rows[0];
 
+    if (['rejected', 'cancelled', 'received', 'completed', 'delivered', 'returned'].includes(po.status))
+      return fail(400, `PO is ${po.status} — no further decisions are possible`);
+
     if (level === 'admin') {
-      // Only the FIRST (admin) stage
-      if (po.status !== 'pending')
-        return res.status(400).json({ error: `PO cannot be admin-approved in its current state (${po.status})` });
-      if (po.admin_approval !== 'pending')
-        return res.status(400).json({ error: 'Admin approval already submitted for this PO' });
+      // Only the FIRST (admin) stage, only from pending
       if (req.user.role !== 'admin')
-        return res.status(403).json({ error: 'Only the Admin can approve at the first stage' });
+        return fail(403, 'Only the Admin can approve at the first stage');
+      if (po.status !== 'pending')
+        return fail(400, `PO cannot be admin-approved in its current state (${po.status})`);
+      if (po.admin_approval !== 'pending')
+        return fail(400, 'Admin approval already submitted for this PO');
     } else {
       // Owner stage — MUST have admin approval first (backend enforcement,
       // not just UI hiding)
-      if (po.status !== 'admin_approved' || po.admin_approval !== 'approved')
-        return res.status(400).json({ error: 'Owner cannot decide before the Admin has approved this PO' });
-      if (po.owner_approval !== 'pending')
-        return res.status(400).json({ error: 'Owner approval already submitted for this PO' });
       if (req.user.role !== 'owner')
-        return res.status(403).json({ error: 'Only the Owner can approve at the final stage' });
+        return fail(403, 'Only the Owner can approve at the final stage');
+      if (po.status !== 'admin_approved' || po.admin_approval !== 'approved')
+        return fail(400, 'Owner cannot decide before the Admin has approved this PO');
+      if (po.owner_approval !== 'pending')
+        return fail(400, 'Owner approval already submitted for this PO');
     }
 
     const decision = approve ? 'approved' : 'rejected';
@@ -139,7 +155,9 @@ async function applyDecision(req, res, level) {
       params = [newStatus, decision, req.user.id, approve ? null : reasonText, req.user.id, id];
     }
     const { rows: updated } = await client.query(sql, params);
+    const { rows: items } = await client.query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at', [id]);
     await client.query('COMMIT');
+    client.release(); released = true;   // before the helpers below borrow a second connection
 
     const poOut = updated[0];
     const verb = approve ? (level === 'admin' ? 'approved' : 'fully approved') : 'rejected';
@@ -162,14 +180,12 @@ async function applyDecision(req, res, level) {
       `${label}${reasonPart}`,
       `/vendors?po=${id}`, 'purchase_order', id);
 
-    const { rows: items } = await client.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [id]);
     res.json({ ...poOut, items });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    if (!released) { try { await client.query('ROLLBACK'); } catch (_) {} }
+    return dbError(res, err);
   } finally {
-    client.release();
+    if (!released) client.release();
   }
 }
 
@@ -192,49 +208,71 @@ router.put('/:id/approve', authenticate, authorize('admin'), (req, res) => {
 
 // Update PO lifecycle (received / cancelled). Approval itself is NOT possible
 // through this endpoint anymore — it goes through the two-step flow above.
+// State machine:
+//   cancelled : only from pending / admin_approved / approved, and only while nothing has been received
+//   received  : only from approved / partial_received, and only once every item is fully delivered
+//               (goods are booked through PUT /api/vendors/pos/:id/delivery, which moves stock)
+//   delivered / cancelled / rejected are terminal.
 router.put('/:id/status', authenticate, authorize('owner', 'admin', 'store_manager'), async (req, res) => {
+  const { status } = req.body;
+  const validStatuses = ['received', 'cancelled'];
+  if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  if (status === 'cancelled' && !['owner', 'admin'].includes(req.user.role))
+    return res.status(403).json({ error: 'Only owners and admins can cancel POs' });
+
+  const client = await pool.connect();
+  let released = false;
+  const fail = async (code, error) => { await client.query('ROLLBACK'); return res.status(code).json({ error }); };
   try {
-    const { status } = req.body;
-    const validStatuses = ['received', 'cancelled'];
-    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    await client.query('BEGIN');
+    const { rows: po } = await client.query('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+    if (po.length === 0) return fail(404, 'PO not found');
+    const current = po[0];
+    const { rows: items } = await client.query('SELECT * FROM purchase_order_items WHERE po_id=$1 ORDER BY created_at', [req.params.id]);
+    const anyReceived = items.some(i => d(i.quantity_delivered).gt(0));
+    const allReceived = items.length > 0 && items.every(i => d(i.quantity_delivered).gte(d(i.quantity)));
 
-    const { rows: po } = await pool.query('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
-    if (po.length === 0) return res.status(404).json({ error: 'PO not found' });
+    if (['rejected', 'cancelled', 'received', 'completed', 'delivered', 'returned'].includes(current.status))
+      return fail(400, `PO is already ${current.status} — no further changes are possible`);
 
-    if (status === 'cancelled' && !['owner', 'admin'].includes(req.user.role))
-      return res.status(403).json({ error: 'Only owners and admins can cancel POs' });
-    if (status === 'received' && po[0].status !== 'approved')
-      return res.status(400).json({ error: `Only fully approved POs can be marked received (current status: ${po[0].status})` });
-
-    const deliveryMap = { 'received': 'delivered', 'partial_received': 'partial', 'cancelled': 'cancelled' };
-    const deliveryStatus = deliveryMap[status] || 'pending';
-    let updateFields = 'status=$1, delivery_status=$2, updated_at=NOW()';
-    const params = [status, deliveryStatus];
-
-    if (status === 'received') {
-      updateFields += ', received_by=$3';
-      params.push(req.user.full_name);
+    if (status === 'cancelled') {
+      if (!['pending', 'admin_approved', 'approved'].includes(current.status))
+        return fail(400, `Cannot cancel a PO that is ${current.status}`);
+      if (anyReceived)
+        return fail(400, 'Cannot cancel a PO after goods have been received against it');
     }
-    params.push(req.params.id);
-    const { rows } = await pool.query(
-      `UPDATE purchase_orders SET ${updateFields} WHERE id=$${params.length} RETURNING *`,
-      params
+    if (status === 'received') {
+      if (!['approved', 'partial_received'].includes(current.status))
+        return fail(400, `Only fully approved POs can be marked received (current status: ${current.status})`);
+      if (!allReceived)
+        return fail(400, 'Not every item has been received yet — record the delivery (Receive goods) first');
+    }
+
+    const deliveryStatus = status === 'received' ? 'delivered' : 'cancelled';
+    const { rows } = await client.query(
+      `UPDATE purchase_orders SET status=$1, delivery_status=$2, received_by=COALESCE($3, received_by), updated_at=NOW()
+       WHERE id=$4 RETURNING *`,
+      [status, deliveryStatus, status === 'received' ? req.user.full_name : null, req.params.id]
     );
+    await client.query('COMMIT');
+    client.release(); released = true;
 
     await logAudit(req.user.id, req.user.full_name, req.user.role, 'po_status', 'purchase_order', req.params.id,
-      `PO ${po[0].po_number} status changed to ${status}`);
-    await addActivity(req.user.full_name, 'po_status', `PO ${po[0].po_number} ${status}`, 'purchase_order', req.params.id);
-
-    if (['received', 'cancelled'].includes(status)) {
-      await createNotification(po[0].created_by, 'purchase_order',
-        `PO ${po[0].po_number} ${status}`,
-        `Purchase order ${po[0].po_number} (${po[0].vendor_name || 'vendor'}) was ${status} by ${req.user.full_name}`,
-        `/vendors?po=${po[0].id}`, 'purchase_order', po[0].id);
+      `PO ${current.po_number} status changed to ${status}`);
+    await addActivity(req.user.full_name, 'po_status', `PO ${current.po_number} ${status}`, 'purchase_order', req.params.id);
+    if (current.created_by) {
+      await createNotification(current.created_by, 'purchase_order',
+        `PO ${current.po_number} ${status}`,
+        `Purchase order ${current.po_number} (${current.vendor_name || 'vendor'}) was ${status} by ${req.user.full_name}`,
+        `/vendors?po=${current.id}`, 'purchase_order', current.id);
     }
-
-    const { rows: items } = await pool.query('SELECT * FROM purchase_order_items WHERE po_id=$1', [req.params.id]);
     res.json({ ...rows[0], items });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) {
+    if (!released) { try { await client.query('ROLLBACK'); } catch (_) {} }
+    return dbError(res, err);
+  } finally {
+    if (!released) client.release();
+  }
 });
 
 module.exports = router;

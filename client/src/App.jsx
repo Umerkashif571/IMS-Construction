@@ -1,7 +1,7 @@
 import { Suspense, lazy } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
-import Layout from './components/Layout'
+import Layout, { navItems } from './components/Layout'
 import Login from './pages/Login'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -34,9 +34,14 @@ function ProtectedRoute({ children }) {
 
 // Role guards mirror the sidebar navItems (Layout.jsx). Server still enforces
 // real authorization on every API; this only prevents direct-URL access.
-function RoleRoute({ roles, children }) {
+// Roles are defined once, in the sidebar's navItems (components/Layout.jsx); the API enforces
+// the same lists in server/src/middleware/auth.js ROLES. This guard only prevents direct-URL access.
+function RoleRoute({ children }) {
   const { user } = useAuth()
-  if (!user || !roles.includes(user.role)) return <Navigate to="/" replace />
+  const location = useLocation()
+  const path = location.pathname
+  const item = navItems.find(i => i.to === path) || navItems.find(i => i.to !== '/' && path.startsWith(i.to))
+  if (!user || (item && !item.roles.includes(user.role))) return <Navigate to="/" replace />
   return children
 }
 
@@ -47,18 +52,18 @@ export default function App() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Suspense fallback={<PageFallback />}><Dashboard /></Suspense>} />
-        <Route path="materials" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Materials /></Suspense></RoleRoute>} />
-        <Route path="vehicles" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Vehicles /></Suspense></RoleRoute>} />
-        <Route path="tools" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Tools /></Suspense></RoleRoute>} />
-        <Route path="projects" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'site_engineer', 'procurement_officer', 'manager', 'staff', 'finance']}><Suspense fallback={<PageFallback />}><Projects /></Suspense></RoleRoute>} />
-        <Route path="vendors" element={<RoleRoute roles={['owner', 'admin', 'procurement_officer', 'store_manager', 'manager', 'staff', 'finance']}><Suspense fallback={<PageFallback />}><Vendors /></Suspense></RoleRoute>} />
-        <Route path="warehouses" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Warehouses /></Suspense></RoleRoute>} />
-        <Route path="reports" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'procurement_officer', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><Reports /></Suspense></RoleRoute>} />
-        <Route path="users" element={<RoleRoute roles={['owner', 'admin']}><Suspense fallback={<PageFallback />}><Users /></Suspense></RoleRoute>} />
-        <Route path="backup" element={<RoleRoute roles={['owner', 'admin']}><Suspense fallback={<PageFallback />}><Backup /></Suspense></RoleRoute>} />
-        <Route path="gatepass" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
-        <Route path="gatepass/:id" element={<RoleRoute roles={['owner', 'admin', 'store_manager', 'manager', 'staff']}><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
-        <Route path="bankbook" element={<RoleRoute roles={['owner', 'admin', 'finance']}><Suspense fallback={<PageFallback />}><BankBook /></Suspense></RoleRoute>} />
+        <Route path="materials" element={<RoleRoute><Suspense fallback={<PageFallback />}><Materials /></Suspense></RoleRoute>} />
+        <Route path="vehicles" element={<RoleRoute><Suspense fallback={<PageFallback />}><Vehicles /></Suspense></RoleRoute>} />
+        <Route path="tools" element={<RoleRoute><Suspense fallback={<PageFallback />}><Tools /></Suspense></RoleRoute>} />
+        <Route path="projects" element={<RoleRoute><Suspense fallback={<PageFallback />}><Projects /></Suspense></RoleRoute>} />
+        <Route path="vendors" element={<RoleRoute><Suspense fallback={<PageFallback />}><Vendors /></Suspense></RoleRoute>} />
+        <Route path="warehouses" element={<RoleRoute><Suspense fallback={<PageFallback />}><Warehouses /></Suspense></RoleRoute>} />
+        <Route path="reports" element={<RoleRoute><Suspense fallback={<PageFallback />}><Reports /></Suspense></RoleRoute>} />
+        <Route path="users" element={<RoleRoute><Suspense fallback={<PageFallback />}><Users /></Suspense></RoleRoute>} />
+        <Route path="backup" element={<RoleRoute><Suspense fallback={<PageFallback />}><Backup /></Suspense></RoleRoute>} />
+        <Route path="gatepass" element={<RoleRoute><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
+        <Route path="gatepass/:id" element={<RoleRoute><Suspense fallback={<PageFallback />}><GatePass /></Suspense></RoleRoute>} />
+        <Route path="bankbook" element={<RoleRoute><Suspense fallback={<PageFallback />}><BankBook /></Suspense></RoleRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db/pool');
 const { authenticate } = require('../middleware/auth');
+const { dbError } = require('../middleware/validate');
 
 const router = express.Router();
 
@@ -10,10 +11,10 @@ router.get('/', authenticate, async (req, res) => {
       pool.query(`SELECT
         (SELECT COALESCE(SUM(quantity * unit_cost), 0)::float FROM materials WHERE is_active=true) as inventory_value,
         (SELECT COUNT(*)::int FROM projects WHERE status='active') as active_projects,
-        (SELECT COUNT(*)::int FROM vehicles WHERE current_status='active') as vehicles_active,
-        (SELECT COUNT(*)::int FROM tools WHERE current_status='checked_out') as tools_checked_out,
+        (SELECT COUNT(*)::int FROM vehicles WHERE is_active=true AND current_status='active') as vehicles_active,
+        (SELECT COUNT(*)::int FROM tools WHERE is_active=true AND current_status='checked_out') as tools_checked_out,
         (SELECT COUNT(*)::int FROM materials WHERE is_active=true AND quantity <= reorder_level) as low_stock_count,
-        (SELECT COUNT(*)::int FROM vehicles WHERE current_status!='retired' AND next_maintenance_date IS NOT NULL AND next_maintenance_date <= NOW() + INTERVAL '30 days') as maintenance_due_count`),
+        (SELECT COUNT(*)::int FROM vehicles WHERE is_active=true AND current_status!='retired' AND next_maintenance_date IS NOT NULL AND next_maintenance_date <= NOW() + INTERVAL '30 days') as maintenance_due_count`),
       pool.query(`SELECT * FROM activity_feed ORDER BY created_at DESC LIMIT 20`),
       pool.query(
         `SELECT p.id, p.name,
@@ -44,14 +45,14 @@ router.get('/', authenticate, async (req, res) => {
       project_budgets: projectBudgets.rows,
       category_breakdown: categoryBreakdown.rows
     });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { return dbError(res, err); }
 });
 
 router.get('/activity', authenticate, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM activity_feed ORDER BY created_at DESC LIMIT 50');
     res.json(rows);
-  } catch (err) { res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { return dbError(res, err); }
 });
 
 module.exports = router;

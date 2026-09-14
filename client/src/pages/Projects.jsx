@@ -13,6 +13,10 @@ const statusBadge = (s) => {
   return <Badge variant={map[s] || 'default'}>{s?.replace(/_/g, ' ') || 'Unknown'}</Badge>
 }
 
+// DATE columns arrive as 'YYYY-MM-DD' (or a legacy ISO timestamp) — never run them through new Date() (TZ shift)
+const toDateInput = (v) => (v ? String(v).slice(0, 10) : '')
+const fmtDate = (v) => (v ? toDateInput(v) : '-')
+
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
 export default function Projects() {
@@ -28,7 +32,10 @@ export default function Projects() {
   const [detailModal, setDetailModal] = useState({ open: false, project: null, materials: [] })
   const [detailTab, setDetailTab] = useState('overview')
 
-  const canEdit = ['owner', 'admin', 'store_manager', 'manager'].includes(user?.role)
+  // Must mirror server: projects.js POST/PUT authorize('owner','admin','site_engineer'), DELETE authorize('owner','admin')
+  const canEdit = ['owner', 'admin', 'site_engineer'].includes(user?.role)
+  const canDelete = ['owner', 'admin'].includes(user?.role)
+  const [saving, setSaving] = useState(false)
   const canAssignManagers = ['owner', 'admin'].includes(user?.role)
   const [projectManagers, setProjectManagers] = useState([])
   const [managerUsers, setManagerUsers] = useState([])
@@ -67,15 +74,20 @@ export default function Projects() {
   useEffect(() => { load(debouncedSearch) }, [debouncedSearch])
 
   const handleSave = async (form) => {
+    if (saving) return
+    setSaving(true)
     try {
-      if (form.id) { await api.put(`/projects/${form.id}`, form); toast.success('Project updated') }
-      else { await api.post('/projects', form); toast.success('Project created') }
+      // Only send the cost value when the user typed one — the server keeps the stored value for omitted fields
+      const payload = { ...form, project_cost_value: form.project_cost_value === '' ? undefined : form.project_cost_value }
+      if (form.id) { await api.put(`/projects/${form.id}`, payload); toast.success('Project updated') }
+      else { await api.post('/projects', payload); toast.success('Project created') }
       setModal({ open: false, item: null }); load(search)
     } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to save') }
+    finally { setSaving(false) }
   }
 
   const handleDelete = async () => {
-    try { await api.delete(`/projects/${deleteConfirm.id}`); toast.success('Project deleted'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error('Failed to delete') }
+    try { await api.delete(`/projects/${deleteConfirm.id}`); toast.success('Project cancelled'); setDeleteConfirm({ open: false, id: null }); load(search) } catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to delete') }
   }
 
   const openDetail = async (project) => {
@@ -114,14 +126,14 @@ export default function Projects() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Projects</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Track construction projects and resource allocation</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Projects</h1>
+          <p className="text-sm text-slate-500 mt-1">Track construction projects and resource allocation</p>
         </div>
         {canEdit && <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Project</Button>}
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="relative max-w-xs w-full">
+        <div className="relative w-full sm:max-w-xs">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input placeholder="Search projects..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
@@ -146,8 +158,8 @@ export default function Projects() {
                   <td className="px-4 py-3 text-slate-500">{[p.location, p.city].filter(Boolean).join(', ') || '-'}</td>
                   <td className="px-4 py-3 font-semibold text-emerald-600">{formatPKR(p.total_material_cost)}</td>
                   <td className="px-4 py-3">{statusBadge(p.status)}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{p.start_date ? new Date(p.start_date).toLocaleDateString() : '-'}</td>
-                  <td className="px-4 py-3 text-xs text-slate-500">{p.end_date ? new Date(p.end_date).toLocaleDateString() : '-'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(p.start_date)}</td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{fmtDate(p.end_date)}</td>
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
                       <button onClick={() => openDetail(p)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Details"><ExternalLink size={15} /></button>
@@ -155,7 +167,7 @@ export default function Projects() {
                       {canEdit && (
                         <>
                           <button onClick={() => setModal({ open: true, item: p })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
-                          <button onClick={() => setDeleteConfirm({ open: true, id: p.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
+                          {canDelete && p.status !== 'cancelled' && <button onClick={() => setDeleteConfirm({ open: true, id: p.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Cancel project"><Trash2 size={15} /></button>}
                         </>
                       )}
                     </div>
@@ -169,9 +181,9 @@ export default function Projects() {
       )}
 
       <Modal isOpen={modal.open} onClose={() => setModal({ open: false, item: null })} title={modal.item?.id ? 'Edit Project' : 'Add Project'} size="max-w-lg">
-        <ProjectForm data={modal.item} onSave={handleSave} onCancel={() => setModal({ open: false, item: null })} />
+        <ProjectForm data={modal.item} onSave={handleSave} saving={saving} onCancel={() => setModal({ open: false, item: null })} />
       </Modal>
-      <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Delete this project?" />
+      <ConfirmDialog isOpen={deleteConfirm.open} onClose={() => setDeleteConfirm({ open: false, id: null })} onConfirm={handleDelete} message="Cancel this project? It becomes read-only until an owner or admin reactivates it." confirmLabel="Cancel project" variant="destructive" />
 
       <Modal isOpen={detailModal.open} onClose={() => setDetailModal({ open: false, project: null, materials: [] })} title={detailModal.project?.name || 'Project Details'} size="max-w-4xl">
         {detailModal.project && (
@@ -302,19 +314,23 @@ export default function Projects() {
   )
 }
 
-function ProjectForm({ data, onSave, onCancel }) {
+function ProjectForm({ data, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     id: data?.id || null, name: data?.name || '', client: data?.client || '',
     location: data?.location || '', city: data?.city || '',
-    start_date: data?.start_date || '', end_date: data?.end_date || '',
+    start_date: toDateInput(data?.start_date), end_date: toDateInput(data?.end_date),
     status: data?.status || 'planning', description: data?.description || '',
-    project_cost_value: data?.project_cost_value || '',
+    project_cost_value: data?.project_cost_value ?? '',
   })
   const [errors, setErrors] = useState({})
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.name) return setErrors({ name: 'Name is required' })
+    const errs = {}
+    if (!form.name.trim()) errs.name = 'Name is required'
+    if (form.start_date && form.end_date && form.end_date < form.start_date) errs.end_date = 'End date cannot be before start date'
+    if (form.project_cost_value !== '' && (!Number.isFinite(Number(form.project_cost_value)) || Number(form.project_cost_value) < 0)) errs.project_cost_value = 'Enter a non-negative amount'
+    if (Object.keys(errs).length) return setErrors(errs)
     setErrors({})
     onSave(form)
   }
@@ -329,16 +345,16 @@ function ProjectForm({ data, onSave, onCancel }) {
         <Select label="Status" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
           <option value="planning">Planning</option><option value="active">Active</option><option value="on_hold">On Hold</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option>
         </Select>
-        <Input label="Project Cost Value (PKR)" type="number" min="0" step="0.01" value={form.project_cost_value} onChange={e => setForm({ ...form, project_cost_value: e.target.value })} />
+        <Input label="Project Cost Value (PKR)" type="number" min="0" step="0.01" value={form.project_cost_value} onChange={e => setForm({ ...form, project_cost_value: e.target.value })} error={errors.project_cost_value} />
         <Input label="Start Date" type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
-        <Input label="End Date" type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
+        <Input label="End Date" type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} error={errors.end_date} />
       </div>
       <div>
         <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Description</label>
         <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
       </div>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">{form.id ? 'Update' : 'Create'}</Button>
+        <Button type="submit" loading={saving} disabled={saving}>{form.id ? 'Update' : 'Create'}</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>

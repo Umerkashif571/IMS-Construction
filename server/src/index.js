@@ -57,6 +57,7 @@ if (!isServerless) {
            AND NOT EXISTS (
              SELECT 1 FROM notifications n
              WHERE n.entity_type = 'tool' AND n.entity_id = t.id AND n.type = 'tool_overdue'
+               AND n.created_at >= cl.check_out_date
            )`
       );
 
@@ -86,8 +87,9 @@ if (!isServerless) {
 }
 
 async function start() {
-  // Schema is initialized in app.js (module load)
-  // Only run delivery status migration and seeding here
+  // Wait for schema initialisation (app.js) before touching tables — on a fresh database the
+  // seeder used to race CREATE TABLE and fail with "relation users does not exist".
+  await app.ready;
   try {
     await pool.query(`
       UPDATE purchase_orders SET delivery_status = CASE status

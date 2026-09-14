@@ -62,8 +62,8 @@ export default function Users() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Users Management</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Manage system users and permissions</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Users Management</h1>
+          <p className="text-sm text-slate-500 mt-1">Manage system users and permissions</p>
         </div>
         <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add User</Button>
       </div>
@@ -73,10 +73,10 @@ export default function Users() {
       ) : users.length === 0 ? (
         <EmptyState icon={UsersIcon} title="No users found" text="No users match your search criteria" />
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
+              <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-3 font-medium">Email</th>
                   <th className="text-left px-4 py-3 font-medium">Full Name</th>
@@ -86,9 +86,9 @@ export default function Users() {
                   <th className="text-left px-4 py-3 font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {safeArray(users).map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50">
+                  <tr key={u.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">{u.email}</td>
                     <td className="px-4 py-3 font-medium">{u.full_name || '-'}</td>
                     <td className="px-4 py-3">
@@ -102,7 +102,7 @@ export default function Users() {
                         u.role === 'staff' ? 'warning' : 'default'
                       }>{u.role?.replace(/_/g, ' ')}</Badge>
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{u.phone || '-'}</td>
+                    <td className="px-4 py-3 text-slate-500">{u.phone || '-'}</td>
                     <td className="px-4 py-3">
                       <Badge variant={u.is_active ? 'success' : 'error'}>{u.is_active ? 'Active' : 'Inactive'}</Badge>
                     </td>
@@ -129,11 +129,11 @@ export default function Users() {
       )}
 
       {/* Audit Logs */}
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h3 className="font-semibold text-gray-800 mb-4">Audit Log</h3>
+      <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <h3 className="font-semibold text-slate-800 mb-4">Audit Log</h3>
         <div className="overflow-x-auto max-h-80 overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 sticky top-0">
+            <thead className="bg-slate-50 text-slate-600 sticky top-0">
               <tr>
                 <th className="text-left px-4 py-2 font-medium">Time</th>
                 <th className="text-left px-4 py-2 font-medium">User</th>
@@ -142,21 +142,21 @@ export default function Users() {
                 <th className="text-left px-4 py-2 font-medium">Details</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-slate-50">
               {safeArray(auditLogs).map(log => (
-                <tr key={log.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 text-xs text-gray-500">{log.created_at ? new Date(log.created_at).toLocaleString() : '-'}</td>
+                <tr key={log.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-2 text-xs text-slate-500">{log.created_at ? new Date(log.created_at).toLocaleString() : '-'}</td>
                   <td className="px-4 py-2 text-sm">{log.user_name || '-'}</td>
                   <td className="px-4 py-2">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${
                       log.action === 'created' ? 'bg-green-100 text-green-700' :
                       log.action === 'updated' ? 'bg-blue-100 text-blue-700' :
                       log.action === 'deleted' ? 'bg-red-100 text-red-700' :
-                      'bg-gray-100 text-gray-600'
+                      'bg-slate-100 text-slate-600'
                     }`}>{log.action}</span>
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-600">{log.entity_type} #{log.entity_id}</td>
-                  <td className="px-4 py-2 text-sm text-gray-500 max-w-xs truncate">{log.description}</td>
+                  <td className="px-4 py-2 text-sm text-slate-600">{log.entity_type} #{log.entity_id}</td>
+                  <td className="px-4 py-2 text-sm text-slate-500 max-w-xs truncate">{log.description}</td>
                 </tr>
               ))}
               {safeArray(auditLogs).length === 0 && <tr><td colSpan={5} className="text-center py-6"><EmptyState icon={Activity} title="No audit logs" text="No audit log entries yet" /></td></tr>}
@@ -173,6 +173,7 @@ export default function Users() {
 }
 
 function UserForm({ data, onSave, onCancel }) {
+  const { user } = useAuth()
   const [form, setForm] = useState({
     id: data?.id || null, email: data?.email || '', password: data?.password || '',
     full_name: data?.full_name || '', role: data?.role || 'site_engineer',

@@ -11,6 +11,8 @@ const router = express.Router();
 const MAX_ATTEMPTS = 8;
 const LOCK_MS = 15 * 60 * 1000;
 const attempts = new Map();
+// bcrypt hash of a random string, used only to equalise timing for unknown emails
+const DUMMY_HASH = bcrypt.hashSync(require('crypto').randomBytes(16).toString('hex'), 10);
 
 // Helper: promise with timeout
 function withTimeout(promise, ms, timeoutError) {
@@ -61,6 +63,7 @@ router.post('/login', async (req, res) => {
   if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
+  if (typeof password !== 'string' || password.length > 1024) return res.status(400).json({ error: 'Invalid credentials' });
   if (isLocked(email, ip)) return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
 
   console.log('Login attempt:', { email: email.trim().toLowerCase(), ip });
@@ -76,7 +79,11 @@ router.post('/login', async (req, res) => {
     }, 2, 1000);
     console.log('Database query completed, rows:', rows.length);
     
-    if (rows.length === 0) { recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' }); }
+    if (rows.length === 0) {
+      // Burn the same bcrypt cost as a real comparison so response time does not reveal whether the email exists.
+      await bcrypt.compare(password, DUMMY_HASH).catch(() => false);
+      recordFailure(email, ip); return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     const user = rows[0];
     console.log('User found, verifying password...');

@@ -76,11 +76,14 @@ export function useProjects(params = {}) {
   const [error, setError] = useState(null)
   const [pagination, setPagination] = useState(null)
   const paramsRef = useRef(params)
+  // Callers usually pass an inline object; key on its serialised form so a new object with the
+  // same values does not re-fetch on every render (which previously looped indefinitely).
+  const paramsKey = new URLSearchParams(params || {}).toString()
+  paramsRef.current = params
 
   const load = useCallback(async () => {
     try {
-      const query = new URLSearchParams(paramsRef.current).toString()
-      const url = query ? `/projects?${query}` : '/projects'
+      const url = paramsKey ? `/projects?${paramsKey}` : '/projects'
       const result = await api.get(url)
       setData(Array.isArray(result?.data?.data) ? result.data.data : (Array.isArray(result?.data) ? result.data : []))
       setPagination(result.data?.pagination || null)
@@ -92,12 +95,9 @@ export function useProjects(params = {}) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [paramsKey])
 
-  useEffect(() => {
-    paramsRef.current = params
-    load()
-  }, [load, params])
+  useEffect(() => { load() }, [load])
 
   const invalidate = useCallback(() => {
     cache.projects = { data: null, timestamp: 0, promise: null }

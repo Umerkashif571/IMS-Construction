@@ -8,6 +8,8 @@ import { useRealtimeGatePasses, useSupabaseChannel } from '../hooks/useRealtime'
 import { supabase } from '../lib/supabase'
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+// HTML-escape anything user-supplied before it is written into the print document
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 
 export default function GatePass() {
   const { id } = useParams()
@@ -16,14 +18,14 @@ export default function GatePass() {
   const [loading, setLoading] = useState(true)
   const [detailModal, setDetailModal] = useState({ open: false, gp: null })
   const [search, setSearch] = useState('')
-  const [realtimeConnected, setRealtimeConnected] = useState(true)
+  const [realtimeConnected, setRealtimeConnected] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
     api.get('/gatepass').then(({ data }) => {
       setGatePasses(data?.data || data || [])
       setLoading(false)
-    }).catch(err => { console.error(err); setLoading(false); toast.error('Failed to load gate passes') })
+    }).catch(err => { console.error(err); setLoading(false); toast.error(err.response?.data?.error || 'Failed to load gate passes') })
   }, [])
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export default function GatePass() {
       api.get(`/gatepass/${id}`).then(({ data }) => {
         setDetailModal({ open: true, gp: data?.data || data })
         setLoading(false)
-      }).catch(err => { console.error(err); setLoading(false); toast.error('Gate pass not found') })
+      }).catch(err => { console.error(err); setLoading(false); toast.error(err.response?.data?.error || 'Gate pass not found') })
     } else {
       load()
     }
@@ -56,13 +58,9 @@ export default function GatePass() {
   useEffect(() => {
     let channel = null
     try {
+      // subscribe() reports the real channel state: SUBSCRIBED | CHANNEL_ERROR | TIMED_OUT | CLOSED
       channel = supabase.channel('connection-monitor-gatepass')
-      channel
-        .on('system', {}, (payload) => {
-          if (payload.type === 'connect') setRealtimeConnected(true)
-          if (payload.type === 'disconnect') setRealtimeConnected(false)
-        })
-        .subscribe()
+      channel.subscribe((status) => setRealtimeConnected(status === 'SUBSCRIBED'))
     } catch (e) {
       console.error('Failed to create gatepass connection monitor channel:', e)
     }
@@ -85,8 +83,9 @@ export default function GatePass() {
 
   const handlePrint = (gp) => {
     const win = window.open('', '_blank')
+    if (!win) return toast.error('Pop-up blocked — allow pop-ups to print')
     const dateStr = gp?.created_at ? new Date(gp.created_at).toLocaleDateString('en-PK', { year: 'numeric', month: 'long', day: 'numeric' }) : ''
-    win.document.write(`<!DOCTYPE html><html><head><title>Gate Pass ${gp?.gate_pass_no}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>Gate Pass ${esc(gp?.gate_pass_no)}</title>
       <style>
         @page { margin: 20mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -110,23 +109,23 @@ export default function GatePass() {
         @media print { body { padding: 0; } .no-print { display: none; } }
       </style></head><body><div class="page">
       <div class="letterhead">
-        <h1>AL-FAJAR CONSTRUCTION</h1>
-        <div class="sub">Engineering &amp; Contracting Division</div>
-        <div class="address">Plot # 12, Sector G-11, Islamabad - Pakistan &bull; Tel: +92-51-1234567 &bull; info@alfajar.com</div>
+        <h1>AL SHAFI ENTERPRISES</h1>
+        <div class="sub">Builders, Contractors &amp; Interior Decorators</div>
+        <div class="address">Inventory &amp; Asset Management System</div>
       </div>
       <div class="title-block"><h2>GATE PASS</h2></div>
-      <div class="gp-no"># ${gp?.gate_pass_no || ''}</div>
+      <div class="gp-no"># ${esc(gp?.gate_pass_no)}</div>
       <table class="details">
-        <tr><td>Date</td><td>${dateStr}</td></tr>
-        <tr><td>Material</td><td>${gp?.material_name || ''}</td></tr>
-        <tr><td>Quantity</td><td>${gp?.quantity || ''} ${gp?.unit || ''}</td></tr>
-        <tr><td>Project</td><td>${gp?.project_name || ''}</td></tr>
-        <tr><td>Vehicle Number</td><td>${gp?.vehicle_number || ''}</td></tr>
-        <tr><td>Driver Name</td><td>${gp?.driver_name || ''}</td></tr>
-        <tr><td>Destination</td><td>${gp?.destination || ''}</td></tr>
-        <tr><td>Issued By</td><td>${gp?.issued_by || ''}</td></tr>
-        <tr><td>Authorized By</td><td>${gp?.authorized_by || ''}</td></tr>
-        <tr><td>Notes</td><td>${gp?.notes || ''}</td></tr>
+        <tr><td>Date</td><td>${esc(dateStr)}</td></tr>
+        <tr><td>Material</td><td>${esc(gp?.material_name)}</td></tr>
+        <tr><td>Quantity</td><td>${esc(gp?.quantity)} ${esc(gp?.unit)}</td></tr>
+        <tr><td>Project</td><td>${esc(gp?.project_name)}</td></tr>
+        <tr><td>Vehicle Number</td><td>${esc(gp?.vehicle_number)}</td></tr>
+        <tr><td>Driver Name</td><td>${esc(gp?.driver_name)}</td></tr>
+        <tr><td>Destination</td><td>${esc(gp?.destination)}</td></tr>
+        <tr><td>Issued By</td><td>${esc(gp?.issued_by)}</td></tr>
+        <tr><td>Authorized By</td><td>${esc(gp?.authorized_by)}</td></tr>
+        <tr><td>Notes</td><td>${esc(gp?.notes)}</td></tr>
       </table>
       <div class="signatures">
         <div class="sig"><div class="line">Issued By Signature</div></div>
@@ -142,15 +141,20 @@ export default function GatePass() {
   const handleSharePdf = async (gp) => {
     try {
       const { data: blob } = await api.get(`/gatepass/${gp.id}/pdf`, { responseType: 'blob' })
-      const url = window.URL.createObjectURL(new Blob([blob]))
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }))
       const a = document.createElement('a')
       a.href = url
-      a.download = `GatePass_${gp.gate_pass_no}.pdf`
+      a.download = `GatePass_${String(gp.gate_pass_no || gp.id).replace(/[^\w.-]+/g, '_')}.pdf`
+      document.body.appendChild(a)
       a.click()
-      window.URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000)
       toast.success('PDF exported')
     } catch (err) {
-      console.error(err); toast.error('PDF export not available, use Print instead')
+      console.error(err)
+      const status = err.response?.status
+      if (status === 401 || status === 403) return toast.error('You are not allowed to export this gate pass')
+      toast.error('PDF export not available, opening print view instead')
       handlePrint(gp)
     }
   }
@@ -172,7 +176,7 @@ export default function GatePass() {
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Gate Pass Not Found</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Gate Pass Not Found</h1>
           </div>
           <Button variant="secondary" onClick={() => navigate('/gatepass')}>
             <ArrowLeft size={16} /> Back to Gate Passes
@@ -186,8 +190,8 @@ export default function GatePass() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Gate Passes</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Auto-generated on stock-out transactions</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Gate Passes</h1>
+          <p className="text-sm text-slate-500 mt-1">Auto-generated on stock-out transactions</p>
         </div>
         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 rounded-lg">
           <span className={`w-2 h-2 rounded-full ${realtimeConnected ? 'bg-emerald-500' : 'bg-red-500'}`} />
@@ -197,7 +201,7 @@ export default function GatePass() {
         </div>
       </div>
 
-      <div className="relative max-w-xs w-full">
+      <div className="relative w-full sm:max-w-xs">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
         <input
           placeholder="Search gate passes..."

@@ -22,8 +22,10 @@ const safeGte = (a, b) => Number(a) >= Number(b)
 
 const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
 
+// Must mirror server finance.js: FULL_ACCESS (writes) and APPROVERS (deletion approvals); owner-approve is owner only.
 const CAN_MANAGE = ['owner', 'admin', 'finance']
 const CAN_APPROVE = ['owner', 'admin']
+const apiError = (err, fallback) => err?.response?.data?.error || fallback
 
 const TX_LABELS = {
   salary: 'Salary',
@@ -104,12 +106,14 @@ export default function ProjectFinance({ projectId, projectName }) {
     if (!amt || amt <= 0) return toast.error('Valid amount required')
     if (!utilForm.date) return toast.error('Date required')
     await utilizationGuard(async () => {
-      const { data } = await api.post(`/projects/${projectId}/finance/petty-cash/${utilForm.petty_cash_id}/utilizations`, {
-        category: utilForm.category, date: utilForm.date, amount: amt, note: utilForm.note, receipt_ref: utilForm.receipt_ref,
-      })
-      toast.success(`Expense of ${formatPKR(data.amount)} recorded`)
-      setUtilModal({ open: false, pc: null })
-      load()
+      try {
+        const { data } = await api.post(`/projects/${projectId}/finance/petty-cash/${utilForm.petty_cash_id}/utilizations`, {
+          category: utilForm.category, date: utilForm.date, amount: amt, note: utilForm.note, receipt_ref: utilForm.receipt_ref,
+        })
+        toast.success(`Expense of ${formatPKR(data.amount)} recorded`)
+        setUtilModal({ open: false, pc: null })
+        load()
+      } catch (err) { console.error(err); toast.error(apiError(err, 'Failed to record expense')) }
     })
   }
 
@@ -145,11 +149,13 @@ const load = useCallback(() => {
 
   const handleSave = async (type, form) => {
     await saveGuard(async () => {
-      const pathMap = { salary: 'salaries', petty_cash: 'petty-cash', vendor_payment: 'vendor-payments', amount_received: 'amount-received' }
-      await api.post(`/projects/${projectId}/finance/${pathMap[type]}`, form)
-      toast.success(`${TX_LABELS[type]} added`)
-      setAddModal(null)
-      load()
+      try {
+        const pathMap = { salary: 'salaries', petty_cash: 'petty-cash', vendor_payment: 'vendor-payments', amount_received: 'amount-received' }
+        await api.post(`/projects/${projectId}/finance/${pathMap[type]}`, form)
+        toast.success(`${TX_LABELS[type]} added`)
+        setAddModal(null)
+        load()
+      } catch (err) { console.error(err); toast.error(apiError(err, `Failed to add ${TX_LABELS[type]}`)) }
     })
   }
 
@@ -161,20 +167,24 @@ const load = useCallback(() => {
   const submitDeletion = async () => {
     if (!delReason.trim()) return toast.error('Reason is required')
     await deletionGuard(async () => {
-      await api.post(`/projects/${projectId}/finance/deletion-requests`, {
-        transaction_type: delModal.type, transaction_id: delModal.id, reason: delReason.trim(),
-      })
-      toast.success('Deletion request submitted for approval')
-      setDelModal({ open: false, type: null, id: null, label: '' })
-      load()
+      try {
+        await api.post(`/projects/${projectId}/finance/deletion-requests`, {
+          transaction_type: delModal.type, transaction_id: delModal.id, reason: delReason.trim(),
+        })
+        toast.success('Deletion request submitted for approval')
+        setDelModal({ open: false, type: null, id: null, label: '' })
+        load()
+      } catch (err) { console.error(err); toast.error(apiError(err, 'Failed to submit deletion request')) }
     })
   }
 
   const handleApproval = async (dr, level, approve) => {
     await approvalGuard(async () => {
-      await api.patch(`/projects/${projectId}/finance/deletion-requests/${dr.id}/${level}-approve`, { approve })
-      toast.success(approve ? 'Approval recorded' : 'Request rejected')
-      load()
+      try {
+        await api.patch(`/projects/${projectId}/finance/deletion-requests/${dr.id}/${level}-approve`, { approve })
+        toast.success(approve ? 'Approval recorded' : 'Request rejected')
+        load()
+      } catch (err) { console.error(err); toast.error(apiError(err, 'Failed to record approval')) }
     })
   }
 
@@ -487,16 +497,16 @@ const load = useCallback(() => {
 
       {/* Add modals */}
       <Modal isOpen={addModal === 'salary'} onClose={() => setAddModal(null)} title="Add Salary" size="max-w-md">
-        <SalaryForm banks={banks} onSave={(f) => handleSave('salary', f)} onCancel={() => setAddModal(null)} />
+        <SalaryForm banks={banks} saving={isSaving} onSave={(f) => handleSave('salary', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'petty_cash'} onClose={() => setAddModal(null)} title="Add Petty Cash Entry" size="max-w-md">
-        <PettyCashForm banks={banks} onSave={(f) => handleSave('petty_cash', f)} onCancel={() => setAddModal(null)} />
+        <PettyCashForm banks={banks} saving={isSaving} onSave={(f) => handleSave('petty_cash', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'vendor_payment'} onClose={() => setAddModal(null)} title="Add Vendor Payment" size="max-w-md">
-        <VendorPaymentForm vendors={vendors} banks={banks} vendorPayments={vendorPayments} onSave={(f) => handleSave('vendor_payment', f)} onCancel={() => setAddModal(null)} />
+        <VendorPaymentForm vendors={vendors} banks={banks} vendorPayments={vendorPayments} saving={isSaving} onSave={(f) => handleSave('vendor_payment', f)} onCancel={() => setAddModal(null)} />
       </Modal>
       <Modal isOpen={addModal === 'amount_received'} onClose={() => setAddModal(null)} title="Add Amount Received" size="max-w-md">
-        <AmountReceivedForm banks={banks} onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
+        <AmountReceivedForm banks={banks} saving={isSaving} onSave={(f) => handleSave('amount_received', f)} onCancel={() => setAddModal(null)} />
       </Modal>
 
       {/* Record petty cash expense (utilization) */}
@@ -517,7 +527,7 @@ const load = useCallback(() => {
           <Input label="Note" value={utilForm.note} onChange={e => setUtilForm({ ...utilForm, note: e.target.value })} placeholder="What was this expense for?" />
           <Input label="Receipt Reference" value={utilForm.receipt_ref} onChange={e => setUtilForm({ ...utilForm, receipt_ref: e.target.value })} placeholder="Optional bill / voucher no." />
           <div className="flex gap-3">
-            <Button onClick={submitUtilization} disabled={isUtilizing}>Record Expense</Button>
+            <Button onClick={submitUtilization} disabled={isUtilizing} loading={isUtilizing}>Record Expense</Button>
             <Button variant="secondary" onClick={() => setUtilModal({ open: false, pc: null })}>Cancel</Button>
           </div>
         </div>
@@ -580,7 +590,7 @@ const load = useCallback(() => {
             />
           </div>
           <div className="flex gap-3">
-            <Button onClick={submitDeletion}>Submit Request</Button>
+            <Button onClick={submitDeletion} disabled={isSubmittingDeletion} loading={isSubmittingDeletion}>Submit Request</Button>
             <Button variant="secondary" onClick={() => setDelModal({ open: false, type: null, id: null, label: '' })}>Cancel</Button>
           </div>
         </div>
@@ -589,7 +599,7 @@ const load = useCallback(() => {
   )
 }
 
-function SalaryForm({ banks, onSave, onCancel }) {
+function SalaryForm({ banks, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     employee_name: '', amount: '', month: new Date().toISOString().slice(0, 7) + '-01', bank_id: '',
   })
@@ -616,14 +626,14 @@ function SalaryForm({ banks, onSave, onCancel }) {
         {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </Select>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Salary</Button>
+        <Button type="submit" loading={saving} disabled={saving}>Add Salary</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   )
 }
 
-function PettyCashForm({ banks, onSave, onCancel }) {
+function PettyCashForm({ banks, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     description: '', amount: '', week_of: new Date().toISOString().slice(0, 10), bank_id: '',
   })
@@ -650,14 +660,14 @@ function PettyCashForm({ banks, onSave, onCancel }) {
         {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </Select>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Entry</Button>
+        <Button type="submit" loading={saving} disabled={saving}>Add Entry</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   )
 }
 
-function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel }) {
+function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     vendor_id: '', payment_type: 'fixed_otp', amount: '',
     po_id: '', bill_number: '', ipc_percent_complete: '', payment_date: new Date().toISOString().slice(0, 10), bank_id: '',
@@ -750,14 +760,14 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel })
         {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </Select>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Payment</Button>
+        <Button type="submit" loading={saving} disabled={saving}>Add Payment</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>
   )
 }
 
-function AmountReceivedForm({ banks, onSave, onCancel }) {
+function AmountReceivedForm({ banks, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     amount: '', received_date: new Date().toISOString().slice(0, 10), description: '', bank_id: '', received_from: '',
   })
@@ -785,7 +795,7 @@ function AmountReceivedForm({ banks, onSave, onCancel }) {
         {(banks || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
       </Select>
       <div className="flex gap-3 pt-2">
-        <Button type="submit">Add Receipt</Button>
+        <Button type="submit" loading={saving} disabled={saving}>Add Receipt</Button>
         <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </form>

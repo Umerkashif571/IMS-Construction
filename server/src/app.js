@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const { router: backupRouter } = require('./routes/backup');
+const { normalizeBody } = require('./middleware/validate');
 
 const authRoutes = require('./routes/auth');
 const materialRoutes = require('./routes/materials');
@@ -27,20 +28,25 @@ const app = express();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const isServerless = !!process.env.VERCEL;
-const runMigrations = process.env.RUN_MIGRATIONS !== 'false';
 
-// Ensure database schema exists (runs on both server and serverless when enabled)
-// In production, set RUN_MIGRATIONS=true only during controlled deployments
-if (runMigrations && !isProduction) {
+// Schema initialisation.
+//  - development: runs on every start unless RUN_MIGRATIONS=false (fresh checkouts just work)
+//  - production:  runs ONLY when RUN_MIGRATIONS=true — ~150 DDL statements (with an exclusive
+//    lock on users) must not run on every serverless cold start. Set it for one deploy after
+//    a schema change, then unset it.
+// `app.ready` resolves when initialisation is finished; API requests wait for it so the first
+// request (or the seeder) never races the CREATE TABLE statements.
+const shouldInitSchema = isProduction ? process.env.RUN_MIGRATIONS === 'true' : process.env.RUN_MIGRATIONS !== 'false';
+let ready = Promise.resolve();
+if (shouldInitSchema) {
   const { createSchema } = require('./db/schema');
-  createSchema().catch(err => console.error('Schema init failed:', err.message));
-} else if (runMigrations && isProduction) {
-  console.log('RUN_MIGRATIONS enabled in production - running schema initialization');
-  const { createSchema } = require('./db/schema');
-  createSchema().catch(err => console.error('Schema init failed:', err.message));
+  console.log(`Schema initialization: running${isProduction ? ' (RUN_MIGRATIONS=true)' : ''}`);
+  ready = createSchema().catch(err => console.error('Schema init failed:', err.message));
 } else {
-  console.log('Schema initialization skipped (set RUN_MIGRATIONS=true to enable)');
+  console.log(`Schema initialization skipped${isProduction ? ' (set RUN_MIGRATIONS=true for one deploy after schema changes)' : ' (RUN_MIGRATIONS=false)'}`);
 }
+app.ready = ready;
+app.use('/api', (req, res, next) => { ready.then(() => next(), () => next()); });
 
 // Auto-seed production database on first request if users table is empty
 // This ensures the default users are created in Vercel serverless environments
@@ -106,6 +112,7 @@ if (!isServerless) {
   app.use(morgan(isProduction ? 'combined' : 'dev'));
 }
 app.use(express.json({ limit: '2mb' }));
+app.use(normalizeBody); // '' -> null so optional DATE/INT/UUID fields never 500
 app.disable('x-powered-by');
 
 // Basic security headers (no external deps)
@@ -117,12 +124,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global JSON parse error handler
+// Body-parser errors (bad JSON, too large, wrong charset) must stop the request here —
+// calling next() without the error would let the route run with an empty body.
 app.use((err, req, res, next) => {
-  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    return res.status(400).json({ error: 'Invalid JSON in request body' });
-  }
-  next();
+  if (!err) return next();
+  if (err.type === 'entity.too.large' || err.status === 413) return res.status(413).json({ error: 'Request body too large (max 2 MB)' });
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'Invalid JSON in request body' });
+  if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message || 'Bad request' });
+  next(err);
 });
 
 // API Routes

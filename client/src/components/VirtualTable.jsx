@@ -16,7 +16,7 @@ export function VirtualTable({ data, columns, rowHeight = 44, height = 400, clas
     [columns, data]
   )
 
-  if (!data.length) {
+  if (!Array.isArray(data) || !data.length) {
     return <div className={`py-12 text-center text-slate-400 ${className}`}>{emptyMessage}</div>
   }
 

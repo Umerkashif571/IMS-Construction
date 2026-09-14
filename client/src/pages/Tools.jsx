@@ -31,14 +31,17 @@ export default function Tools() {
   const [checkinForm, setCheckinForm] = useState({ condition_on_return: 'good', notes: '', returned_by: '' })
   const [historyModal, setHistoryModal] = useState({ open: false, tool: null, history: [] })
 
-  const canManage = ['owner', 'admin', 'store_manager', 'site_engineer', 'manager'].includes(user?.role)
+  // Must match server authorize() lists in server/src/routes/tools.js
+  const canManage = ['owner', 'admin', 'store_manager'].includes(user?.role)
+  const canCheckout = ['owner', 'admin', 'store_manager', 'site_engineer'].includes(user?.role)
+  const canDelete = ['owner', 'admin'].includes(user?.role)
 
   const load = (q = '') => {
     setLoading(true)
-    const params = q ? `?search=${q}` : ''
+    const params = q ? `?search=${encodeURIComponent(q)}` : ''
     Promise.all([api.get(`/tools${params}`), api.get('/warehouses')])
       .then(([tRes, wRes]) => { setTools(tRes?.data?.data || tRes?.data || []); setWarehouses(wRes?.data?.data || wRes?.data || []) })
-      .catch(err => { console.error(err); toast.error('Failed to load tools') })
+      .catch(err => { console.error(err); toast.error(err.response?.data?.error || 'Failed to load tools') })
       .finally(() => setLoading(false))
   }
 
@@ -69,7 +72,7 @@ export default function Tools() {
 
   const handleDelete = async () => {
     try { await api.delete(`/tools/${deleteConfirm.id}`); toast.success('Tool deleted'); setDeleteConfirm({ open: false, id: null }); load(search) }
-    catch (err) { console.error(err); toast.error('Failed to delete') }
+    catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to delete') }
   }
 
   const handleCheckout = async () => {
@@ -90,7 +93,7 @@ export default function Tools() {
       setCheckinModal({ open: true, tool, checkoutRecord: record })
       setCheckinForm({ condition_on_return: 'good', notes: '', returned_by: '' })
     } catch (err) {
-      console.error(err); toast.error('Failed to load checkout info')
+      console.error(err); toast.error(err.response?.data?.error || 'Failed to load checkout info')
     }
   }
 
@@ -107,7 +110,7 @@ export default function Tools() {
 
   const openHistory = async (tool) => {
     try { const { data } = await api.get(`/tools/${tool.id}/checkout-history`); setHistoryModal({ open: true, tool, history: data }) }
-    catch (err) { console.error(err); toast.error('Failed to load history') }
+    catch (err) { console.error(err); toast.error(err.response?.data?.error || 'Failed to load history') }
   }
 
   const isMaintDue = (t) => t.next_maintenance_date && new Date(t.next_maintenance_date) <= new Date()
@@ -116,14 +119,14 @@ export default function Tools() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Tools & Equipment</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Track tool inventory, checkouts, and maintenance</p>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">Tools & Equipment</h1>
+          <p className="text-sm text-slate-500 mt-1">Track tool inventory, checkouts, and maintenance</p>
         </div>
         {canManage && <Button onClick={() => setModal({ open: true, item: {} })}><Plus size={16} /> Add Tool</Button>}
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="relative max-w-xs w-full">
+        <div className="relative w-full sm:max-w-xs">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input placeholder="Search tools..." value={search} onChange={e => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500" />
@@ -156,19 +159,19 @@ export default function Tools() {
               <Td className="text-xs text-slate-500">{t.next_maintenance_date ? new Date(t.next_maintenance_date).toLocaleDateString() : '-'}</Td>
               <Td align="center">
                 <div className="flex items-center justify-center gap-1">
-                  {canManage && t.current_status === 'available' && (
+                  {canCheckout && t.current_status === 'available' && (
                     <button onClick={() => { setCheckoutModal({ open: true, tool: t }); setCheckoutForm({ checked_out_to: '', employee_name: '', assigned_project_id: '', expected_return_date: '', notes: '' }) }}
                       className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Checkout"><ArrowUpFromLine size={15} /></button>
                   )}
-                  {canManage && t.current_status === 'checked_out' && (
+                  {canCheckout && t.current_status === 'checked_out' && (
                     <button onClick={() => openCheckin(t)}
                       className="p-1.5 hover:bg-emerald-50 rounded text-emerald-600 transition-colors" title="Checkin"><ArrowDownToLine size={15} /></button>
                   )}
                   {canManage && (
-                    <>
-                      <button onClick={() => setModal({ open: true, item: t })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
-                      <button onClick={() => setDeleteConfirm({ open: true, id: t.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
-                    </>
+                    <button onClick={() => setModal({ open: true, item: t })} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 transition-colors" title="Edit"><Edit3 size={15} /></button>
+                  )}
+                  {canDelete && (
+                    <button onClick={() => setDeleteConfirm({ open: true, id: t.id })} className="p-1.5 hover:bg-red-50 rounded text-red-600 transition-colors" title="Delete"><Trash2 size={15} /></button>
                   )}
                   <button onClick={() => openHistory(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400 transition-colors" title="History"><History size={15} /></button>
                 </div>
@@ -253,15 +256,16 @@ function ToolForm({ data, onSave, onCancel }) {
     id: data?.id || null, name: data?.name || '', serial_number: data?.serial_number || '',
     type: data?.type || '', category: data?.category || '',
     current_condition: data?.current_condition || 'good', current_status: data?.current_status || 'available',
-    purchase_cost: data?.purchase_cost || 0, purchase_date: data?.purchase_date || '',
-    notes: data?.notes || '', next_maintenance_date: data?.next_maintenance_date || '',
+    purchase_cost: data?.purchase_cost ?? '', purchase_date: data?.purchase_date ? String(data.purchase_date).slice(0, 10) : '',
+    notes: data?.notes || '', next_maintenance_date: data?.next_maintenance_date ? String(data.next_maintenance_date).slice(0, 10) : '',
     warehouse_id: data?.warehouse_id || '', storage_location: data?.storage_location || ''
   })
   const [errors, setErrors] = useState({})
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (!form.name) return setErrors({ name: 'Name is required' })
+    if (!form.name.trim()) return setErrors({ name: 'Name is required' })
+    if (form.purchase_cost !== '' && (isNaN(Number(form.purchase_cost)) || Number(form.purchase_cost) < 0)) return setErrors({ purchase_cost: 'Must be a number >= 0' })
     setErrors({})
     onSave(form)
   }
@@ -276,10 +280,16 @@ function ToolForm({ data, onSave, onCancel }) {
         <Select label="Condition" value={form.current_condition} onChange={e => setForm({ ...form, current_condition: e.target.value })}>
           <option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option><option value="damaged">Damaged</option>
         </Select>
-        <Select label="Status" value={form.current_status} onChange={e => setForm({ ...form, current_status: e.target.value })}>
-          <option value="available">Available</option><option value="checked_out">Checked Out</option><option value="under_maintenance">Under Maintenance</option><option value="retired">Retired</option>
-        </Select>
-        <Input label="Purchase Cost" type="number" value={form.purchase_cost} onChange={e => setForm({ ...form, purchase_cost: e.target.value })} />
+        {form.current_status === 'checked_out' ? (
+          <Select label="Status" value="checked_out" disabled hint="Use Check in to change">
+            <option value="checked_out">Checked Out</option>
+          </Select>
+        ) : (
+          <Select label="Status" value={form.current_status} onChange={e => setForm({ ...form, current_status: e.target.value })}>
+            <option value="available">Available</option><option value="under_maintenance">Under Maintenance</option><option value="retired">Retired</option>
+          </Select>
+        )}
+        <Input label="Purchase Cost" type="number" min="0" step="0.01" value={form.purchase_cost} onChange={e => setForm({ ...form, purchase_cost: e.target.value })} error={errors.purchase_cost} />
         <Input label="Purchase Date" type="date" value={form.purchase_date} onChange={e => setForm({ ...form, purchase_date: e.target.value })} />
         <Input label="Next Maintenance" type="date" value={form.next_maintenance_date} onChange={e => setForm({ ...form, next_maintenance_date: e.target.value })} />
         <Input label="Storage Location" value={form.storage_location} onChange={e => setForm({ ...form, storage_location: e.target.value })} />
