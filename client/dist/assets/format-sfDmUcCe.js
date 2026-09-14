@@ -1,1 +1,0 @@
-var n=t=>t.replace(/\B(?=(\d{3})+(?!\d))/g,","),i=t=>{const r=Number(t),s=Number.isFinite(r)?r:0,e=s<0?"-":"",[a,o]=Math.abs(s).toFixed(2).split(".");return`Rs. ${e}${n(a)}.${o}`},c=t=>{const r=Number(t),s=Math.round(Number.isFinite(r)?r:0);return`Rs. ${s<0?"-":""}${n(String(Math.abs(s)))}`};export{c as n,i as t};
