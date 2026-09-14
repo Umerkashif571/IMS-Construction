@@ -4,7 +4,7 @@
   "installCommand": "npm install && npm --prefix server install && npm --prefix client install",
   "buildCommand": "node build-vercel.js",
   "builds": [
-    { "src": "api/index.js", "use": "@vercel/node" }
+    { "src": "api/index.js", "use": "@vercel/node", "config": { "includeFiles": ["server/public/**"] } }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "/api/index.js" }
