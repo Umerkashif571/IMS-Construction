@@ -2,14 +2,12 @@
   "version": 2,
   "regions": ["sin1"],
   "installCommand": "npm install && npm --prefix server install && npm --prefix client install",
-  "buildCommand": "cd client && npm run build && echo 'Build complete, checking dist:' && ls -la dist/",
+  "buildCommand": "cd client && npm run build && mkdir -p ../server/public && cp -r dist/* ../server/public/",
   "builds": [
-    { "src": "client/dist/**", "use": "@vercel/static" },
-    { "src": "api/index.js", "use": "@vercel/node" }
+    { "src": "api/index.js", "use": "@vercel/node", "config": { "includeFiles": ["server/public/**"] } }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/api/index.js" },
-    { "src": "/(.*)", "dest": "/client/dist/$1" }
+    { "src": "/(.*)", "dest": "/api/index.js" }
   ],
   "env": {
     "NODE_ENV": "production"
