@@ -147,6 +147,7 @@ const load = useCallback(() => {
     Promise.allSettled(allPromises.map(p => p.promise)).then(results => {
       let idx = 0
       let hasError = false
+      let errorMessages = []
       corePromises.forEach(({ key }) => {
         const res = results[idx++]
         if (res.status === 'fulfilled') {
@@ -160,7 +161,10 @@ const load = useCallback(() => {
           else if (key === 'banks') setBanks(safeArray(data))
         } else {
           hasError = true
-          console.error(`Failed to load ${key}:`, res.reason)
+          const err = res.reason
+          const msg = err?.response?.data?.error || err?.message || String(err)
+          console.error(`Failed to load ${key}:`, err)
+          errorMessages.push(`${key}: ${msg}`)
         }
       })
       conditionalPromises.forEach(({ key }) => {
@@ -171,10 +175,13 @@ const load = useCallback(() => {
           else if (key === 'deletionRequests') setDeletionRequests(safeArray(data))
         } else {
           hasError = true
-          console.error(`Failed to load ${key}:`, res.reason)
+          const err = res.reason
+          const msg = err?.response?.data?.error || err?.message || String(err)
+          console.error(`Failed to load ${key}:`, err)
+          errorMessages.push(`${key}: ${msg}`)
         }
       })
-      if (hasError) toast.error('Some finance data failed to load — check console')
+      if (hasError) toast.error(`Finance load failed: ${errorMessages.join('; ')}`)
     }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
