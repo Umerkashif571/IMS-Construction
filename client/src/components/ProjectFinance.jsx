@@ -20,7 +20,12 @@ const safeToNumber = (v) => Math.round(Number(v) * 100) / 100
 const safeGt = (a, b) => Number(a) > Number(b)
 const safeGte = (a, b) => Number(a) >= Number(b)
 
-const safeArray = (data) => Array.isArray(data) ? data : (Array.isArray(data?.data) ? data.data : []);
+const safeArray = (data) => {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.data)) return data.data
+  if (Array.isArray(data?.data?.data)) return data.data.data
+  return []
+}
 
 // Must mirror server finance.js: FULL_ACCESS (writes) and APPROVERS (deletion approvals); owner-approve is owner only.
 const CAN_MANAGE = ['owner', 'admin', 'finance']
@@ -120,29 +125,54 @@ export default function ProjectFinance({ projectId, projectName }) {
 const load = useCallback(() => {
     setLoading(true)
     const base = `/projects/${projectId}/finance`
-    const promises = [
-      api.get(`${base}/summary`),
-      api.get(`${base}/salaries`),
-      api.get(`${base}/petty-cash`),
-      api.get(`${base}/petty-cash/utilizations`),
-      api.get(`${base}/amount-received`),
+
+    // Always-fetch endpoints
+    const corePromises = [
+      { key: 'summary', promise: api.get(`${base}/summary`) },
+      { key: 'salaries', promise: api.get(`${base}/salaries`) },
+      { key: 'pettyCash', promise: api.get(`${base}/petty-cash`) },
+      { key: 'utilizations', promise: api.get(`${base}/petty-cash/utilizations`) },
+      { key: 'amountReceived', promise: api.get(`${base}/amount-received`) },
+      { key: 'vendors', promise: api.get('/vendors') },
+      { key: 'banks', promise: api.get('/banks') },
     ]
-    if (canSeeVendors) promises.push(api.get(`${base}/vendor-payments`))
-    if (canSeeDeletionRequests) promises.push(api.get(`${base}/deletion-requests`))
-    promises.push(api.get('/vendors'))
-    promises.push(api.get('/banks'))
-    Promise.all(promises).then(results => {
-      let i = 0
-      setSummary(results[i++]?.data)
-      setSalaries(safeArray(results[i++]?.data))
-      setPettyCash(safeArray(results[i++]?.data))
-      setUtilizations(safeArray(results[i++]?.data))
-      setAmountReceived(safeArray(results[i++]?.data))
-      if (canSeeVendors) setVendorPayments(safeArray(results[i++]?.data))
-      if (canSeeDeletionRequests) setDeletionRequests(safeArray(results[i++]?.data))
-      setVendors(safeArray(results[i].data))
-      setBanks(safeArray(results[i + 1].data))
-    }).catch(err => { console.error(err); toast.error('Failed to load finance data') }).finally(() => setLoading(false))
+
+    // Conditional endpoints
+    const conditionalPromises = []
+    if (canSeeVendors) conditionalPromises.push({ key: 'vendorPayments', promise: api.get(`${base}/vendor-payments`) })
+    if (canSeeDeletionRequests) conditionalPromises.push({ key: 'deletionRequests', promise: api.get(`${base}/deletion-requests`) })
+
+    // Fetch all independently, collect results
+    const allPromises = [...corePromises, ...conditionalPromises]
+    Promise.allSettled(allPromises.map(p => p.promise)).then(results => {
+      let idx = 0
+      corePromises.forEach(({ key }) => {
+        const res = results[idx++]
+        if (res.status === 'fulfilled') {
+          const data = res.value?.data
+          if (key === 'summary') setSummary(data)
+          else if (key === 'salaries') setSalaries(safeArray(data))
+          else if (key === 'pettyCash') setPettyCash(safeArray(data))
+          else if (key === 'utilizations') setUtilizations(safeArray(data))
+          else if (key === 'amountReceived') setAmountReceived(safeArray(data))
+          else if (key === 'vendors') setVendors(safeArray(data))
+          else if (key === 'banks') setBanks(safeArray(data))
+        } else {
+          console.error(`Failed to load ${key}:`, res.reason)
+        }
+      })
+      conditionalPromises.forEach(({ key }) => {
+        const res = results[idx++]
+        if (res.status === 'fulfilled') {
+          const data = res.value?.data
+          if (key === 'vendorPayments') setVendorPayments(safeArray(data))
+          else if (key === 'deletionRequests') setDeletionRequests(safeArray(data))
+        } else {
+          console.error(`Failed to load ${key}:`, res.reason)
+        }
+      })
+      toast.error('Some finance data failed to load — check console')
+    }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
   useEffect(() => { load() }, [load])
@@ -676,7 +706,9 @@ function VendorPaymentForm({ vendors, banks, vendorPayments, onSave, onCancel, s
   const [errors, setErrors] = useState({})
 
   useEffect(() => {
-    api.get('/purchase-orders').then(r => setPos(r.data || [])).catch(err => { console.error(err); toast.error('Failed to load purchase orders') })
+    api.get('/purchase-orders')
+      .then(r => setPos(safeArray(r.data)))
+      .catch(err => { console.error(err); toast.error('Failed to load purchase orders') })
   }, [])
 
   // Spec: only fully approved POs appear in the Continuous payment PO dropdown

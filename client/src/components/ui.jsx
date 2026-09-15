@@ -259,9 +259,12 @@ export function Select({ label, error, hint, id, children, className = '', requi
 /* ------------------------------------------------------------------ */
 
 function useDialogBehaviour(isOpen, onClose, panelRef) {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!isOpen) return
-    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.() } }
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current?.() } }
     document.addEventListener('keydown', onKey)
     const prevOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -275,9 +278,10 @@ function useDialogBehaviour(isOpen, onClose, panelRef) {
       clearTimeout(t)
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
-      previouslyFocused?.focus?.()
+      // Only restore focus on actual close (isOpen becoming false), not on onClose handler changes
+      if (!isOpen) previouslyFocused?.focus?.()
     }
-  }, [isOpen, onClose, panelRef])
+  }, [isOpen, panelRef])
 }
 
 export function Modal({ isOpen, onClose, title, subtitle, children, footer, size = 'max-w-lg' }) {
