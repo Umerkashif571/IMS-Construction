@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, Suspense, lazy } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { DollarSign, Building2, Truck, Wrench, AlertTriangle, Settings, Activity, Package } from 'lucide-react'
 import bannerImg from '../assets/banner-collage.jpg'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
 import api from '../api'
 import { StatCard, Card, CardHeader, CardContent, LoadingSkeleton, EmptyState } from '../components/ui'
 import toast from 'react-hot-toast'
-import { formatPKR, formatPKRWhole } from '../format'
+import { formatPKRWhole } from '../format'
 import { useCoalescedRealtime } from '../hooks/useRealtime'
+
+const BarChartSkeleton = () => <LoadingSkeleton rows={8} cols={2} />
+const PieChartSkeleton = () => <LoadingSkeleton rows={8} cols={2} />
+
+const BarChart = lazy(() => import('./charts/BarChart'))
+const PieChart = lazy(() => import('./charts/PieChart'))
 
 // Large rupee amounts in a KPI tile: 'Rs 479.5M' (exact value goes in the hint)
 const compactPKR = (v) => {
@@ -62,7 +67,7 @@ export default function Dashboard() {
     }))
   }, [data?.category_breakdown])
 
-  const recentActivity = useMemo(() => {
+const recentActivity = useMemo(() => {
     const activity = data?.recent_activity
     return Array.isArray(activity) ? activity : (activity?.data ? Array.isArray(activity.data) ? activity.data : [] : [])
   }, [data?.recent_activity])
@@ -125,20 +130,9 @@ export default function Dashboard() {
             {budgetData.length === 0 ? (
               <EmptyState icon={Package} title="No project data" text="No material cost data available yet" />
             ) : (
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={budgetData} margin={{ top: 5, right: 5, left: -15, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(0)}K` : v} />
-                    <Tooltip
-                      contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                      formatter={v => [formatPKR(v), 'Material Cost']}
-                    />
-                    <Bar dataKey="cost" fill="#059669" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <Suspense fallback={<BarChartSkeleton />}>
+                <BarChart data={budgetData} />
+              </Suspense>
             )}
           </CardContent>
         </Card>
@@ -150,35 +144,9 @@ export default function Dashboard() {
             {categoryData.length === 0 ? (
               <EmptyState icon={Package} title="No categories" text="No inventory data available" />
             ) : (
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%" cy="45%"
-                      innerRadius={55}
-                      outerRadius={90}
-                      paddingAngle={2}
-                      dataKey="value"
-                    >
-                      {categoryData.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}
-                      formatter={v => [formatPKR(v), 'Value']}
-                    />
-                    <Legend
-                      layout="vertical"
-                      align="right"
-                      verticalAlign="middle"
-                      iconType="circle"
-                      formatter={(value) => <span className="text-xs text-slate-600">{value}</span>}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              <Suspense fallback={<PieChartSkeleton />}>
+                <PieChart data={categoryData} />
+              </Suspense>
             )}
           </CardContent>
         </Card>
