@@ -146,6 +146,7 @@ const load = useCallback(() => {
     const allPromises = [...corePromises, ...conditionalPromises]
     Promise.allSettled(allPromises.map(p => p.promise)).then(results => {
       let idx = 0
+      let hasError = false
       corePromises.forEach(({ key }) => {
         const res = results[idx++]
         if (res.status === 'fulfilled') {
@@ -158,6 +159,7 @@ const load = useCallback(() => {
           else if (key === 'vendors') setVendors(safeArray(data))
           else if (key === 'banks') setBanks(safeArray(data))
         } else {
+          hasError = true
           console.error(`Failed to load ${key}:`, res.reason)
         }
       })
@@ -168,10 +170,11 @@ const load = useCallback(() => {
           if (key === 'vendorPayments') setVendorPayments(safeArray(data))
           else if (key === 'deletionRequests') setDeletionRequests(safeArray(data))
         } else {
+          hasError = true
           console.error(`Failed to load ${key}:`, res.reason)
         }
       })
-      toast.error('Some finance data failed to load — check console')
+      if (hasError) toast.error('Some finance data failed to load — check console')
     }).finally(() => setLoading(false))
   }, [projectId, canSeeVendors, canSeeDeletionRequests])
 
