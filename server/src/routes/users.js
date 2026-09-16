@@ -15,7 +15,7 @@ router.get('/', authenticate, authorize('owner', 'admin'), async (req, res) => {
       params
     );
     res.json(rows);
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { console.error(`[users] /?role= error:`, err); res.status(500).json({ error: 'Server error' }); }
 });
 
 router.post('/', authenticate, authorize('owner', 'admin'), async (req, res) => {

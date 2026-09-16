@@ -142,7 +142,7 @@ router.get('/:id/material-cost', authenticate, async (req, res) => {
       [req.params.id]
     );
     res.json(rows);
-  } catch (err) { return dbError(res, err); }
+  } catch (err) { console.error(`[projects] /:id/material-cost error:`, err); return dbError(res, err); }
 });
 
 router.post('/', authenticate, authorize('owner', 'admin', 'site_engineer'), async (req, res) => {
@@ -374,7 +374,7 @@ router.get('/:id/managers', authenticate, authorize('owner', 'admin'), async (re
       [req.params.id]
     );
     res.json(rows);
-  } catch (err) { return dbError(res, err); }
+  } catch (err) { console.error(`[projects] /:id/managers error:`, err); return dbError(res, err); }
 });
 
 router.put('/:id/managers/:userId', authenticate, authorize('owner', 'admin'), async (req, res) => {
