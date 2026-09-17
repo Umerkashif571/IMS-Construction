@@ -28,6 +28,33 @@ function safeNotifyRoles(roles, type, title, message = null, link = null, entity
 
 const router = express.Router({ mergeParams: true });
 
+// One-time migration endpoint to create missing indexes on production DB
+// Protected by auth + secret token in header
+router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, res) => {
+  const token = req.headers['x-migration-token'];
+  const expectedToken = process.env.MIGRATION_TOKEN || 'run-migration-once';
+  if (token !== expectedToken) return res.status(403).json({ error: 'Invalid migration token' });
+  try {
+    const results = [];
+    // Create the composite index for material_transactions summary query
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type_material
+      ON material_transactions(project_id, type, material_id)
+    `);
+    results.push('idx_material_transactions_project_type_material created');
+    // Also ensure other indexes exist
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type
+      ON material_transactions(project_id, type)
+    `);
+    results.push('idx_material_transactions_project_type ensured');
+    res.json({ success: true, results });
+  } catch (err) {
+    console.error('Migration error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // :projectId comes from the parent mount path (mergeParams), so router.param() never fires for
 // it — validate it up front. :id is declared by this router's own routes.
 router.use((req, res, next) => {
