@@ -91,6 +91,51 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     await pool.query('ANALYZE material_transactions');
     results.push('ANALYZE material_transactions completed');
     
+    // Create materialized view for instant project material cost lookup
+    await pool.query(`
+      CREATE MATERIALIZED VIEW IF NOT EXISTS project_material_cost_summary AS
+      SELECT 
+        mt.project_id,
+        COALESCE(SUM(mt.quantity * m.unit_cost), 0)::float as total_material_cost
+      FROM material_transactions mt
+      JOIN materials m ON mt.material_id = m.id
+      WHERE mt.type = 'out'
+      GROUP BY mt.project_id
+    `);
+    results.push('project_material_cost_summary materialized view created');
+    
+    // Create unique index on the materialized view for fast lookups
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_project_material_cost_summary_project_id
+      ON project_material_cost_summary(project_id)
+    `);
+    results.push('Unique index on materialized view created');
+    
+    // Create function to refresh the materialized view
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION refresh_project_material_cost_summary()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        REFRESH MATERIALIZED VIEW CONCURRENTLY project_material_cost_summary;
+        RETURN NULL;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    results.push('Refresh function created');
+    
+    // Create trigger on material_transactions to refresh the view
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trigger_refresh_material_cost_summary ON material_transactions;
+      CREATE TRIGGER trigger_refresh_material_cost_summary
+      AFTER INSERT OR UPDATE OR DELETE ON material_transactions
+      FOR EACH STATEMENT EXECUTE FUNCTION refresh_project_material_cost_summary()
+    `);
+    results.push('Trigger on material_transactions created');
+    
+    // Initial refresh
+    await pool.query('REFRESH MATERIALIZED VIEW CONCURRENTLY project_material_cost_summary');
+    results.push('Materialized view initially refreshed');
+    
     res.json({ success: true, results });
   } catch (err) {
     console.error('Migration error:', err);
