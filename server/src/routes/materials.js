@@ -317,9 +317,9 @@ router.post('/:id/stock-in', authenticate, authorize('owner', 'admin', 'store_ma
 
     const txnDate = date ? new Date(date) : new Date();
     await client.query(
-      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, added_by, notes, source, received_by, transaction_type, date, po_id)
-       VALUES ($1, 'in', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-      [req.params.id, qty, newQty, warehouse_id, req.user.full_name, notes || null, source || null, received_by || null, transaction_type || null, txnDate, po_id || null]
+      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, added_by, notes, source, received_by, transaction_type, date, po_id, unit_cost)
+       VALUES ($1, 'in', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [req.params.id, qty, newQty, warehouse_id, req.user.full_name, notes || null, source || null, received_by || null, transaction_type || null, txnDate, po_id || null, Number(mat[0].unit_cost) || 0]
     );
 
     await client.query(
@@ -415,9 +415,9 @@ router.post('/:id/stock-out', authenticate, authorize('owner', 'admin', 'store_m
     const projectName = project.length > 0 ? project[0].name : '';
 
     await client.query(
-      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date)
-       VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())`,
-      [req.params.id, qty, newQty, warehouse_id, project_id, location.trim(), driver_name.trim(), vehicle_number.trim(), req.user.full_name, notes || null, transaction_type || null]
+      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date, unit_cost)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), $12)`,
+      [req.params.id, qty, newQty, warehouse_id, project_id, location.trim(), driver_name.trim(), vehicle_number.trim(), req.user.full_name, notes || null, transaction_type || null, unitCost]
     );
 
     await client.query(
@@ -586,8 +586,8 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
     );
 
     await client.query(
-      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes, unit_cost)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         req.params.id,
         movement_type,
@@ -599,7 +599,8 @@ router.post('/:id/movement', authenticate, authorize('owner', 'admin', 'store_ma
         movement_type === 'out' ? driver_name.trim() : null,
         movement_type === 'out' ? vehicle_number.trim() : null,
         req.user.full_name,
-        notes || null
+        notes || null,
+        Number(mat[0].unit_cost) || 0
       ]
     );
 

@@ -113,7 +113,7 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), asy
   let released = false;
   try {
     await client.query('BEGIN');
-    const { rows: material } = await client.query('SELECT id, name, unit, quantity FROM materials WHERE id=$1 AND is_active = true FOR UPDATE', [material_id]);
+    const { rows: material } = await client.query('SELECT id, name, unit, quantity, unit_cost FROM materials WHERE id=$1 AND is_active = true FOR UPDATE', [material_id]);
     if (material.length === 0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Material not found' }); }
     const mat = material[0];
     const prevQty = parseFloat(mat.quantity || 0);
@@ -141,9 +141,9 @@ router.post('/', authenticate, authorize('owner', 'admin', 'store_manager'), asy
     const gp = rows[0];
 
     await client.query(
-      `INSERT INTO material_transactions (material_id, type, quantity, running_total, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date)
-       VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
-      [material_id, qty, newQty, project_id || null, destination, driver_name, vehicle_number, req.user.full_name, notes ?? null, 'gate_pass']
+      `INSERT INTO material_transactions (material_id, type, quantity, running_total, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date, unit_cost)
+       VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), $11)`,
+      [material_id, qty, newQty, project_id || null, destination, driver_name, vehicle_number, req.user.full_name, notes ?? null, 'gate_pass', Number(mat.unit_cost) || 0]
     );
     await client.query(
       `INSERT INTO stock_movements (material_id, material_name, movement_type, quantity, unit, reference_type, reference_id, notes, user_id, user_name)

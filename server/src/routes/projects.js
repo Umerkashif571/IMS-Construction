@@ -291,9 +291,9 @@ router.post('/:id/allocations', authenticate, authorize('owner', 'admin', 'site_
         const newQty = available - qty;
         await client.query('UPDATE materials SET quantity=$1, updated_at=NOW() WHERE id=$2', [newQty, entity_id]);
         await client.query(
-          `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date)
-           VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, 'allocation', NOW())`,
-          [entity_id, qty, newQty, mat[0].warehouse_id, req.params.id, proj[0].name, null, null, req.user.full_name, notes || null]
+          `INSERT INTO material_transactions (material_id, type, quantity, running_total, warehouse_id, project_id, location, driver_name, vehicle_number, added_by, notes, transaction_type, date, unit_cost)
+           VALUES ($1, 'out', $2, $3, $4, $5, $6, $7, $8, $9, $10, 'allocation', NOW(), $11)`,
+          [entity_id, qty, newQty, mat[0].warehouse_id, req.params.id, proj[0].name, null, null, req.user.full_name, notes || null, Number(mat[0].unit_cost) || 0]
         );
         await client.query(
           `INSERT INTO stock_movements (material_id, material_name, movement_type, quantity, unit, notes, warehouse_id, user_id, user_name)

@@ -451,6 +451,28 @@ async function createSchema(pool = require('./pool')) {
       END $$;
     `);
 
+    // Add unit_cost to material_transactions for fast summary queries (avoids JOIN with materials)
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='material_transactions' AND column_name='unit_cost'
+        ) THEN
+          ALTER TABLE material_transactions ADD COLUMN unit_cost DECIMAL(12,2) DEFAULT 0;
+        END IF;
+      END $$;
+    `);
+
+    // Backfill unit_cost for existing 'out' transactions from materials table
+    await client.query(`
+      UPDATE material_transactions mt
+      SET unit_cost = m.unit_cost
+      FROM materials m
+      WHERE mt.material_id = m.id
+        AND mt.unit_cost IS NULL
+        AND mt.type = 'out'
+    `);
+
     // Add po_id and received_by to purchase_orders if missing
     await client.query(`
       DO $$ BEGIN
