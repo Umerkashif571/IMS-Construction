@@ -56,12 +56,12 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     `);
     results.push('idx_material_transactions_project_type_cover created (covering index)');
     
-    // Partial index for type='out' queries (smaller, more efficient)
+    // Covering partial index for summary query (index-only scan for project_id filter + quantity, material_id)
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_out
-      ON material_transactions(project_id) WHERE type = 'out'
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_out_cover
+      ON material_transactions(project_id) INCLUDE (quantity, material_id) WHERE type = 'out'
     `);
-    results.push('idx_material_transactions_project_out created (partial index)');
+    results.push('idx_material_transactions_project_out_cover created (covering partial index)');
     
     // Add unit_cost column to material_transactions if missing (for fast summary query)
     await pool.query(`
