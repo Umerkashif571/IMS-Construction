@@ -49,6 +49,13 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     `);
     results.push('idx_material_transactions_project_type ensured');
     
+    // Covering index for summary query (index-only scan for project_id, type filter + quantity, unit_cost)
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type_cover
+      ON material_transactions(project_id, type) INCLUDE (quantity, unit_cost)
+    `);
+    results.push('idx_material_transactions_project_type_cover created (covering index)');
+    
     // Add unit_cost column to material_transactions if missing (for fast summary query)
     await pool.query(`
       DO $$ BEGIN
