@@ -113,6 +113,7 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     
     // Create function to refresh the materialized view (manual only, not on every change)
     await pool.query(`
+      DROP FUNCTION IF EXISTS refresh_project_material_cost_summary();
       CREATE OR REPLACE FUNCTION refresh_project_material_cost_summary()
       RETURNS VOID AS $$
       BEGIN
@@ -120,7 +121,7 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
       END;
       $$ LANGUAGE plpgsql
     `);
-    results.push('Refresh function created (manual only)');
+    results.push('Refresh function recreated (manual only)');
     
     // Initial refresh
     await pool.query('REFRESH MATERIALIZED VIEW CONCURRENTLY project_material_cost_summary');
