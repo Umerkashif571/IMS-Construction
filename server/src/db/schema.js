@@ -878,6 +878,7 @@ async function createSchema(pool = require('./pool')) {
       CREATE INDEX IF NOT EXISTS idx_material_transactions_project_id ON material_transactions(project_id);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_created_at ON material_transactions(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type ON material_transactions(project_id, type);
+      CREATE INDEX IF NOT EXISTS idx_material_transactions_project_type_material ON material_transactions(project_id, type, material_id);
       CREATE INDEX IF NOT EXISTS idx_material_transactions_material_project_type ON material_transactions(material_id, project_id, type);
       CREATE INDEX IF NOT EXISTS idx_gate_passes_material_id ON gate_passes(material_id);
       CREATE INDEX IF NOT EXISTS idx_gate_passes_project_id ON gate_passes(project_id);
