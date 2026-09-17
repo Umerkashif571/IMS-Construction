@@ -218,10 +218,14 @@ router.get('/summary', authenticate, async (req, res) => {
         [req.params.projectId]
       ),
       pool.query(
-        `SELECT COALESCE(SUM(mt.quantity * m.unit_cost), 0)::float as total
-         FROM material_transactions mt
-         JOIN materials m ON mt.material_id = m.id
-         WHERE mt.project_id=$1 AND mt.type='out'`,
+        `WITH filtered AS (
+           SELECT mt.quantity, m.unit_cost
+           FROM material_transactions mt
+           JOIN materials m ON mt.material_id = m.id
+           WHERE mt.project_id=$1 AND mt.type='out'
+         )
+         SELECT COALESCE(SUM(filtered.quantity * filtered.unit_cost), 0)::float as total
+         FROM filtered`,
         [req.params.projectId]
       )
     ]);
