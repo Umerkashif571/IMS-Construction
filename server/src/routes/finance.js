@@ -111,26 +111,16 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     `);
     results.push('Unique index on materialized view created');
     
-    // Create function to refresh the materialized view
+    // Create function to refresh the materialized view (manual only, not on every change)
     await pool.query(`
       CREATE OR REPLACE FUNCTION refresh_project_material_cost_summary()
-      RETURNS TRIGGER AS $$
+      RETURNS VOID AS $$
       BEGIN
         REFRESH MATERIALIZED VIEW CONCURRENTLY project_material_cost_summary;
-        RETURN NULL;
       END;
       $$ LANGUAGE plpgsql
     `);
-    results.push('Refresh function created');
-    
-    // Create trigger on material_transactions to refresh the view
-    await pool.query(`
-      DROP TRIGGER IF EXISTS trigger_refresh_material_cost_summary ON material_transactions;
-      CREATE TRIGGER trigger_refresh_material_cost_summary
-      AFTER INSERT OR UPDATE OR DELETE ON material_transactions
-      FOR EACH STATEMENT EXECUTE FUNCTION refresh_project_material_cost_summary()
-    `);
-    results.push('Trigger on material_transactions created');
+    results.push('Refresh function created (manual only)');
     
     // Initial refresh
     await pool.query('REFRESH MATERIALIZED VIEW CONCURRENTLY project_material_cost_summary');
