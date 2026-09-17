@@ -111,6 +111,12 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
     `);
     results.push('Unique index on materialized view created');
     
+    // Drop trigger if exists (from previous migration runs)
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trigger_refresh_material_cost_summary ON material_transactions;
+    `).catch(() => {});
+    results.push('Old trigger dropped if existed');
+    
     // Create function to refresh the materialized view (manual only, not on every change)
     await pool.query(`
       DROP FUNCTION IF EXISTS refresh_project_material_cost_summary();
