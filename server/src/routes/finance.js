@@ -48,6 +48,31 @@ router.post('/_migrate', authenticate, authorize('owner', 'admin'), async (req, 
       ON material_transactions(project_id, type)
     `);
     results.push('idx_material_transactions_project_type ensured');
+    
+    // Add unit_cost column to material_transactions if missing (for fast summary query)
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='material_transactions' AND column_name='unit_cost'
+        ) THEN
+          ALTER TABLE material_transactions ADD COLUMN unit_cost DECIMAL(12,2) DEFAULT 0;
+        END IF;
+      END $$;
+    `);
+    results.push('unit_cost column added to material_transactions');
+    
+    // Backfill unit_cost for existing 'out' transactions from materials table
+    await pool.query(`
+      UPDATE material_transactions mt
+      SET unit_cost = m.unit_cost
+      FROM materials m
+      WHERE mt.material_id = m.id
+        AND mt.unit_cost IS NULL
+        AND mt.type = 'out'
+    `);
+    results.push('unit_cost backfilled for existing out transactions');
+    
     res.json({ success: true, results });
   } catch (err) {
     console.error('Migration error:', err);
